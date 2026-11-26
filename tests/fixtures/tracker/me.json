@@ -1,0 +1,30 @@
+{
+ "id": 7,
+ "username": "member",
+ "full_name": "Member Test",
+ "full_name_display": "Member Test",
+ "color": "#70db4e",
+ "bio": "",
+ "lang": "",
+ "theme": "",
+ "timezone": "",
+ "is_active": true,
+ "photo": null,
+ "big_photo": null,
+ "gravatar_id": "a4fae232e2bfebd9f4dc8d7cb6caecb2",
+ "roles": [
+  "Back"
+ ],
+ "total_private_projects": 0,
+ "total_public_projects": 0,
+ "email": "member@example.com",
+ "uuid": "2d69463a772740fbb0b9c81c697e33aa",
+ "date_joined": "2026-11-26T11:20:51.725Z",
+ "read_new_terms": true,
+ "accepted_terms": true,
+ "max_private_projects": null,
+ "max_public_projects": null,
+ "max_memberships_private_projects": null,
+ "max_memberships_public_projects": null,
+ "verified_email": true
+}

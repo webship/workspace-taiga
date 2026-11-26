@@ -1,0 +1,92 @@
+{
+ "due_date": null,
+ "due_date_reason": "",
+ "due_date_status": "not_set",
+ "total_comments": 0,
+ "tags": [],
+ "attachments": [],
+ "status": 1,
+ "status_extra_info": {
+  "name": "New",
+  "color": "#70728F",
+  "is_closed": false
+ },
+ "assigned_to": null,
+ "assigned_to_extra_info": null,
+ "owner": 7,
+ "owner_extra_info": {
+  "username": "member",
+  "full_name_display": "Member Test",
+  "photo": null,
+  "big_photo": null,
+  "gravatar_id": "a4fae232e2bfebd9f4dc8d7cb6caecb2",
+  "is_active": true,
+  "id": 7
+ },
+ "is_watcher": false,
+ "total_watchers": 0,
+ "is_voter": false,
+ "total_voters": 0,
+ "project": 1,
+ "project_extra_info": {
+  "name": "Webship site",
+  "slug": "webship-site",
+  "logo_small_url": null,
+  "id": 1
+ },
+ "id": 2,
+ "ref": 2,
+ "milestone": null,
+ "milestone_slug": null,
+ "milestone_name": null,
+ "is_closed": false,
+ "points": {
+  "1": 1,
+  "2": 1,
+  "3": 1,
+  "4": 1
+ },
+ "backlog_order": 1795692053719691,
+ "sprint_order": 1795692053719705,
+ "kanban_order": 1795692053725587,
+ "created_date": "2026-11-26T11:20:53.725Z",
+ "modified_date": "2026-11-26T11:20:53.729Z",
+ "finish_date": null,
+ "subject": "The usage line spells greeting as greting",
+ "client_requirement": false,
+ "team_requirement": false,
+ "generated_from_issue": null,
+ "generated_from_task": null,
+ "from_task_ref": null,
+ "external_reference": null,
+ "tribe_gig": null,
+ "version": 1,
+ "watchers": [],
+ "is_blocked": false,
+ "blocked_note": "",
+ "total_points": null,
+ "comment": "",
+ "origin_issue": null,
+ "origin_task": null,
+ "epics": null,
+ "epic_order": null,
+ "tasks": [],
+ "total_attachments": 0,
+ "swimlane": null,
+ "assigned_users": [],
+ "blocked_note_html": "",
+ "description": "The usage line of `greeting.sh` says *greting*.",
+ "description_html": "<p>The usage line of <code>greeting.sh</code> says <em>greting</em>.</p>",
+ "neighbors": {
+  "previous": {
+   "id": 1,
+   "ref": 1,
+   "subject": "The greeting script says Helo instead of Hello"
+  },
+  "next": {
+   "id": 3,
+   "ref": 3,
+   "subject": "Add a test for the greeting"
+  }
+ }
+}

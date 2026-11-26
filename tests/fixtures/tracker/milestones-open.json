@@ -1,0 +1,124 @@
+[
+ {
+  "project": 1,
+  "project_extra_info": {
+   "name": "Webship site",
+   "slug": "webship-site",
+   "logo_small_url": null,
+   "id": 1
+  },
+  "id": 1,
+  "name": "Sprint 1",
+  "slug": "sprint-1",
+  "owner": 6,
+  "estimated_start": "2026-11-23",
+  "estimated_finish": "2026-12-07",
+  "created_date": "2026-11-26T11:20:53.549Z",
+  "modified_date": "2026-11-26T11:20:53.553Z",
+  "closed": false,
+  "disponibility": 0.0,
+  "order": 1,
+  "user_stories": [
+   {
+    "due_date": null,
+    "due_date_reason": "",
+    "due_date_status": "not_set",
+    "assigned_to": 7,
+    "assigned_to_extra_info": {
+     "username": "member",
+     "full_name_display": "Member Test",
+     "photo": null,
+     "big_photo": null,
+     "gravatar_id": "a4fae232e2bfebd9f4dc8d7cb6caecb2",
+     "is_active": true,
+     "id": 7
+    },
+    "status": 3,
+    "status_extra_info": {
+     "name": "In progress",
+     "color": "#E47C40",
+     "is_closed": false
+    },
+    "project": 1,
+    "project_extra_info": {
+     "name": "Webship site",
+     "slug": "webship-site",
+     "logo_small_url": null,
+     "id": 1
+    },
+    "id": 1,
+    "ref": 1,
+    "milestone": 1,
+    "is_closed": false,
+    "created_date": "2026-11-26T11:20:53.633Z",
+    "modified_date": "2026-11-26T11:20:54.194Z",
+    "finish_date": null,
+    "subject": "The greeting script says Helo instead of Hello",
+    "client_requirement": false,
+    "team_requirement": false,
+    "external_reference": null,
+    "version": 3,
+    "is_blocked": false,
+    "blocked_note": "",
+    "backlog_order": 1795692053625456,
+    "sprint_order": 1795692053625479,
+    "kanban_order": 1795692053633535,
+    "epics": null,
+    "points": {
+     "1": 1,
+     "2": 1,
+     "3": 1,
+     "4": 1
+    },
+    "total_points": null
+   },
+   {
+    "due_date": null,
+    "due_date_reason": "",
+    "due_date_status": "not_set",
+    "assigned_to": null,
+    "assigned_to_extra_info": null,
+    "status": 5,
+    "status_extra_info": {
+     "name": "Done",
+     "color": "#A8E440",
+     "is_closed": true
+    },
+    "project": 1,
+    "project_extra_info": {
+     "name": "Webship site",
+     "slug": "webship-site",
+     "logo_small_url": null,
+     "id": 1
+    },
+    "id": 3,
+    "ref": 3,
+    "milestone": 1,
+    "is_closed": true,
+    "created_date": "2026-11-26T11:20:53.832Z",
+    "modified_date": "2026-11-26T11:20:53.837Z",
+    "finish_date": "2026-11-26T11:20:53.845Z",
+    "subject": "Add a test for the greeting",
+    "client_requirement": false,
+    "team_requirement": false,
+    "external_reference": null,
+    "version": 1,
+    "is_blocked": false,
+    "blocked_note": "",
+    "backlog_order": 1795692053825339,
+    "sprint_order": 1795692053825352,
+    "kanban_order": 1795692053832986,
+    "epics": null,
+    "points": {
+     "1": 1,
+     "2": 1,
+     "3": 1,
+     "4": 1
+    },
+    "total_points": null
+   }
+  ],
+  "total_points": null,
+  "closed_points": null
+ }
+]
