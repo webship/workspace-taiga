@@ -1,0 +1,33 @@
+# Taiga — core/config/plugin.taiga.settings.yml
+#
+# The Taiga the dashboard reads user stories from: a site the builder made (https://<name>.ddev.site), or your own. The
+# username and the application token are an account's there, so the dashboard acts as that person:
+# `cmd-tools-taiga-cli.sh <site> --connect <login>` makes the token with Taiga's own code; on your own Taiga, the person
+# authorises the application on Taiga's screen (/external-apps?application=<id>&state=<any>). Never printed.
+# The Taiga address, without a trailing slash.
+url: CHANGE_ME
+# The username of the account the dashboard reads (and, with writes on, writes) as.
+username: CHANGE_ME
+# An application token of that account (Authorization: Application <token>). Taiga keeps it until it is removed.
+token: CHANGE_ME
+# The user stories as work items (the tracker family). See @webship.co/workspace-tracker for every key.
+# Writes to Taiga: comments, status changes, tags, assignees, new user stories. Off by default.
+allow_writes: false
+# Author sessions at once.
+max_agents: 1
+# The Taiga project a workspace project works against when it remembers none: its slug (webship-site).
+default_scope: ""
+# The Taiga projects (their slugs) the list may be switched to; empty is any project the account is a member of.
+scopes: []
+# branch: a new branch in the project; worktree: a git worktree outside the workspace folders.
+work_in: branch
+# required: Claude Code's sandbox for the author session, and no session without it; off: a person's choice.
+sandbox: required
+# Domains the sandbox allows (the project's package registries).
+network_domains: []
+# WebFetch and WebSearch in the author session.
+allow_web: false
+# The comments a snapshot keeps: members (the project's administrators and its members who may change user stories), all, none.
+comments_from: members
+# A user story from outside the project (made, or last edited, by someone whose role may not change user stories, or someone the project does not have): analyze (work it only after a confirmation that names its author) or refuse.
+outsider_items: analyze

@@ -1,0 +1,60 @@
+# Labels for core/config/plugin.taiga.settings.yml, merged into the Settings page.
+url:
+  label: Taiga address
+  info: 'The site the dashboard reads user stories from: https://<name>.ddev.site for one the builder made, or your own. No trailing slash.'
+username:
+  label: Username
+  info: 'The username of the account the dashboard reads (and, with writes on, writes) as.'
+token:
+  label: Application token
+  info: 'An application token of that account, so the dashboard acts as that person: `bash cmd-tools-taiga-cli.sh <site> --connect <login>` makes one with Taiga''s own code, in the place of its earlier one; on your own Taiga, the person authorises the application on Taiga''s screen (/external-apps?application=<id>&state=<any>). Taiga keeps it until it is removed. Never printed.'
+allow_writes:
+  label: Writes to Taiga (user stories)
+  info: 'Off: the AI works on a branch and nothing leaves this machine. On: you may comment on a user story, change its status, tag it and assign it, and add a new one, each a click after a preview, each a line in actions.log.'
+  options:
+    "false": "Off — nothing is written to Taiga (default)"
+    "true": "On — each write is your click after a preview"
+max_agents:
+  label: Author sessions at once
+  info: 'How many AI sessions may work user stories at the same time. Each is a whole session in a project.'
+  number: { min: 1, max: 8, step: 1 }
+default_scope:
+  label: Default Taiga project
+  info: 'The slug of the Taiga project a workspace project works against when it remembers none, as webship-site (the last part of the project''s address).'
+scopes:
+  label: Taiga projects the list may switch to
+  info: 'A list of project slugs. Empty is any project the account is a member of. Edit it in the Raw YAML tab.'
+work_in:
+  label: Where the AI works
+  info: 'A new branch in the project (a running site shows the change), or a git worktree outside the workspace folders (the project stays as it is).'
+  options:
+    branch: "A branch in the project (default)"
+    worktree: "A worktree outside the workspace folders"
+sandbox:
+  label: Sandbox for the author session
+  info: 'Required: Claude Code''s sandboxed Bash (no network, credentials denied), and no session without it. On Ubuntu 24.04 bubblewrap needs its AppArmor profile (see the tracker''s README). Off: your choice, said in the form.'
+  options:
+    required: "Required (default)"
+    "off": "Off — the session is not sandboxed"
+network_domains:
+  label: Domains the sandbox allows
+  info: 'The package registries the project needs (registry.npmjs.org, repo.packagist.org…). None by default. Edit it in the Raw YAML tab.'
+allow_web:
+  label: Web tools in the author session
+  info: 'WebFetch and WebSearch. Off by default: a link in a user story is not opened.'
+  options:
+    "false": "Off (default)"
+    "true": "On"
+comments_from:
+  label: Comments the AI reads
+  info: 'Members: only comments by the project''s administrators and the members whose role may change user stories (default). All, or none.'
+  options:
+    members: "Administrators and members (default)"
+    all: "All comments"
+    none: "No comments"
+outsider_items:
+  label: User stories from outside the project
+  info: 'Made, or last edited, by someone whose role may not change user stories (a reader, a stakeholder), or someone the project does not have. Analyze: analyze only, unless you tick a confirmation that names them. Refuse: analyze only.'
+  options:
+    analyze: "Analyze only, unless confirmed by name (default)"
+    refuse: "Analyze only"
