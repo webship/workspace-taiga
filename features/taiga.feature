@@ -38,16 +38,20 @@ Feature: The Taiga plugin on the dashboard
       And I should see "taiga-issue-to-branch"
 
   # The user stories as work items (@webship.co/workspace-tracker). The list asks Taiga again when its View or its
-  # filter changes, and Enter submits it. It needs a Taiga with a token, a default project and a project in the dev
-  # folder: CI has none, so it skips this, saying why.
+  # filter changes, and Enter submits it; the current sprint is its iteration view. It needs a Taiga with a token, a
+  # default project and a project in the dev folder: CI has none, so it skips this, saying why.
   @needs-setting-taiga-token @needs-setting-taiga-default_scope @needs-project-dev
-  Scenario: The user story list follows its View and its filter
+  Scenario: The user story list follows its View, the current sprint among them, and its filter
     Given I am on "/dev"
      When I click on the element ".act-menu-taiga > button"
       And I click on the element ".act-menu-taiga a[hx-get*='/tracker/list/']"
      Then eventually I should see "All open user stories ·" within 30 seconds
      When I select "My user stories" from "view"
      Then eventually I should see "My user stories ·" within 30 seconds
+     When I select "Current sprint" from "view"
+     Then eventually I should see "Current sprint ·" within 30 seconds
+      And I should see "The greeting script says Helo instead of Hello"
+      And I should not see "The usage line spells greeting as greting"
      When I select "Search (Taiga's own syntax)" from "view"
       And I fill in "q" with "greting"
       And I press the key "Enter" on the element "input[name=q]"
