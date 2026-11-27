@@ -4,7 +4,8 @@ Taiga, the open-source agile project management platform, for the [Webship Works
 a container-based workspace (DDEV by default). The plugin brings:
 
 - **a builder**, `cmd-taiga-project.sh`: a real Taiga site from Taiga's own images, as its reference setup runs them, on
-  the project's own PostgreSQL 12, on DDEV, with the workspace account as the site's administrator, the default
+  the project's own PostgreSQL 12, on DDEV, Docker Compose, Podman or Kubernetes, with the workspace account as the
+  site's administrator, the default
   accounts in their roles of a sample Scrum project, and its sprint, user stories, an assignee, a tag, a comment and a
   task;
 - **a tool**, `cmd-tools-taiga-cli.sh`: what a site is, its accounts and its user stories, Taiga's own management
@@ -33,8 +34,9 @@ bash core/scripts/plugins.sh --configure taiga
 
 - A sites folder: one of the `dev`, `test`, `sandboxes` or `demos` plugins. The commands are placed there.
 - The AI folders `ai-agents`, `ai-skills`, `ai-commands` and `ai-prompts`, where its AI items land.
-- DDEV, the container runtime Taiga is proven on so far. Docker Compose, Podman and Kubernetes are not proven for it
-  yet: asked for one, the builder says so and changes nothing.
+- A container runtime: DDEV (the default), Docker Compose, Podman or Kubernetes. On Docker Compose and Podman the
+  Workspace's core must start a project's own services again when they stop on their own (webship/workspace#959, core
+  1.0.45): the builder says so on an older core, and changes nothing. Lando and Docksal are not proven for Taiga yet.
 - A download of about 1.3 GB for Taiga's images the first time, and memory: the builder asks for 2 GB free before it
   starts (`free -m`).
 
@@ -50,7 +52,7 @@ bash cmd-taiga-project.sh mysite --install --add-users --sample-content
 | `--install` | Makes the workspace account (`account` of `core/config/settings.yml`) the site's administrator (its Django admin at `/admin/` too). Taiga's own forms ask a password of at least six characters. The public sign-up stays off |
 | `--add-users` | With `--install`: the default accounts, in their roles of the Scrum project Webship site |
 | `--sample-content` | With `--install --add-users`: Sprint 1, three user stories of Webship site (two in the sprint, one in the backlog), an assignee, a tag, a comment and a task |
-| `--runtime ddev` | DDEV, the runtime proven for Taiga so far (the default, or `container.runtime` of `settings.yml`) |
+| `--runtime <runtime>` | `ddev` (the default, or `container.runtime` of `settings.yml`), `docker` (Docker Compose), `podman` or `kubernetes`: see [On Docker Compose, Podman and Kubernetes](#on-docker-compose-podman-and-kubernetes) |
 | `--launch` | Open the site when it is ready |
 
 A project of the same name is deleted first, with its database and its volumes. The site is Taiga's reference setup
@@ -68,9 +70,9 @@ catcher, at `https://mysite.ddev.site:8026`, where the site's mail goes.
 | `docker.io/taigaio/taiga-front:6.10.3` | Taiga's front end | [taigaio/taiga-front](https://github.com/taigaio/taiga-front), AGPL-3.0 |
 | `docker.io/taigaio/taiga-events:6.10.0` | Taiga's events (websockets) | [taigaio/taiga-events](https://github.com/taigaio/taiga-events), MPL-2.0 |
 | `docker.io/taigaio/taiga-protected:6.10.1` | Taiga's protected media | [taigaio/taiga-protected](https://github.com/taigaio/taiga-protected), MPL-2.0 |
-| `docker.io/library/nginx:1.19.10-alpine` | The gateway | [nginx](https://nginx.org), BSD-2-Clause; the image's own files, [nginxinc/docker-nginx](https://github.com/nginxinc/docker-nginx), BSD-2-Clause |
+| `docker.io/library/nginx:1.19.10-alpine` | The gateway on DDEV (on the other runtimes Debian's nginx package, in the web container) | [nginx](https://nginx.org), BSD-2-Clause; the image's own files, [nginxinc/docker-nginx](https://github.com/nginxinc/docker-nginx), BSD-2-Clause |
 | `docker.io/library/rabbitmq:3.8.34-management-alpine` | The two RabbitMQ | [rabbitmq/rabbitmq-server](https://github.com/rabbitmq/rabbitmq-server), MPL-2.0; the image's own files, [docker-library/rabbitmq](https://github.com/docker-library/rabbitmq), MIT |
-| DDEV's `postgres:12` | The project's database | [PostgreSQL](https://www.postgresql.org), PostgreSQL License |
+| DDEV's `postgres:12` (the stack's `postgres:12` on the other runtimes) | The project's database | [PostgreSQL](https://www.postgresql.org), PostgreSQL License |
 
 Every image is pinned, never `latest`: Taiga's at the newest 6.10 release of each, and nginx and RabbitMQ at the exact
 releases the reference's tags (`1.19-alpine`, `3.8-management-alpine`) stand for today. A build runs what was proven.
@@ -103,6 +105,63 @@ input, never on a command line, never in a log.
 The site's own values (its secret key, the RabbitMQ account) are kept in `taiga/*.env` of the project, which only you
 can read. The builder never prints them. Taiga's events service writes the session tokens it is given into its own log
 at info level: the builder never prints that log.
+
+### On Docker Compose, Podman and Kubernetes
+
+```bash
+bash cmd-taiga-project.sh mysite --install --add-users --sample-content --runtime docker   # or podman, kubernetes
+```
+
+The builder works through the Workspace's runtime layer there, and the site is the same: Taiga 6.10 on the project's
+own PostgreSQL 12, the same accounts and the same sample content, at the address the runtime gives it
+(`http://127.0.0.1:<port>`, or the node's address and a NodePort on Kubernetes). The stack's Mailpit catches its mail.
+The layout differs from DDEV's in one place, the back end:
+
+- **Taiga's back-end image is the web container's** (`rt_stack image`, with nginx added). Once the project's
+  PostgreSQL takes connections (the stack's start waits for it), the container runs as the host user
+  (`taiga/taiga-serve.sh`, `rt_serve`) what the image's own start does: Taiga's migrations and its project templates,
+  then its API. It also runs the back end's Celery worker with its scheduler, and the gateway (nginx, with the routes
+  of the gateway on DDEV, in `taiga/nginx.conf`), which are containers of their own on DDEV. Two reasons: the back end
+  makes its tables as it starts, so it must start once the database answers; and the gateway serves the media the back
+  end writes, through the protected service's answer, from the same folder.
+- **The web container stops when its API, its Celery worker or its gateway stops**, and stops the other two first,
+  with a code that is not 0. On Kubernetes the pod then starts again; on Docker Compose and Podman the project's row
+  shows it stopped, never half of Taiga running. Start the project again (`ddev start`, or the row's switch).
+- **Taiga's other services are services of the project's own** (`rt_service`), under the names they have on DDEV, so
+  the site's values are the same: the front end (`taiga-front`), the events (`taiga-events`), the protected media
+  (`taiga-protected`), and the two RabbitMQ (`taiga-events-rabbitmq`, `taiga-async-rabbitmq`), each with its data in a
+  volume of the project's own and a node name (`rabbit@localhost`) that stays when its container gets another host
+  name. None of them needs the database or another service to start.
+- **The events come back on their own** there too: Docker Compose and Podman start a project's own service again when
+  it stops on its own (`restart: on-failure`, webship/workspace#959, core 1.0.45), and Kubernetes does by itself. The
+  builder asks for that core on Docker Compose and Podman.
+- **The database is the stack's PostgreSQL 12** (`postgres:12`), as on DDEV, reached as `db`.
+- **The media** Taiga keeps beside its database are in the project's `taiga/files/media`. Taiga's static files are the
+  image's own.
+- **At a plain http address** Taiga's cookies are not Secure (`SESSION_COOKIE_SECURE`, `CSRF_COOKIE_SECURE`), so a
+  browser keeps them, and its events go over `ws://`.
+- **The site script and Taiga's own commands** run in the web container, with the site's values, as Taiga's back end.
+
+The project's volumes go with it when it is removed (`cmd-tools-remove.sh`), and when a project of the same name is
+built again.
+
+### Backups
+
+Taiga's database is the project's PostgreSQL on every runtime: DDEV's, or the runtime's. The core backs it up and puts
+it back itself, as for any project on PostgreSQL:
+
+- **A backup** is the core's own dump: a gzipped PostgreSQL dump (`…-db.sql.gz`) beside the project's archive.
+- **The row's Import** on Docker Compose, Podman and Kubernetes puts the dump into a database of its own and swaps it
+  in, which a Taiga that is connected to its database does not stop.
+- **On DDEV**, DDEV's own import drops the database first, which PostgreSQL refuses while Taiga's back end or its Celery
+  worker are connected, as they can be once the site has been used. The Workspace's core closes the database to new
+  connections and ends its sessions first (webship/workspace#968). Until the Workspace's core 1.0.47, stop Taiga's back
+  end and its worker before an Import on DDEV, and start them again after:
+  `docker stop ddev-<name>-taiga-async ddev-<name>-taiga-back`, then `docker start ddev-<name>-taiga-back
+  ddev-<name>-taiga-async`.
+- **What Taiga keeps beside its database** (attachments, photos, exports): on DDEV in the project's media volume, which
+  the backup does not hold; on the other runtimes in the project's `taiga/files/media`, which the project's archive
+  holds.
 
 ### The default accounts
 
@@ -226,7 +285,7 @@ GITLAB) when its remote is on a forge.
 - **A worklog.** Taiga has no time tracking of its own: there is no time to read or log on a user story.
 - **Tasks, issues and epics as work items.** The work items are the project's user stories; their tasks show on a
   user story's page and on the taskboard.
-- **Other runtimes.** Docker Compose, Podman and Kubernetes are not proven for Taiga yet.
+- **Lando and Docksal.** Taiga is proven on DDEV, Docker Compose, Podman and Kubernetes.
 
 ## Testing a site
 
