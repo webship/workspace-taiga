@@ -9,12 +9,14 @@
 # with what it needs (accounts, passwords, a login) on its input, as the base64 of a JSON object, never on a command
 # line. A token it makes is printed only by the verb "token", on its own line (TOKEN …), for the tool to store.
 #
-# Verbs: version, install, accounts, content, tidy (with the flag "list": only what it would remove), list, token, counts.
+# Verbs: version, brokers, install, accounts, content, tidy (with the flag "list": only what it would remove), list, token,
+# counts.
 
 import base64
 import datetime
 import json
 import os
+import re
 import sys
 
 import requests
@@ -88,6 +90,22 @@ class Session:
 def verb_version(_):
     import taiga
     say('VERSION %s' % taiga.__version__)
+
+
+def verb_brokers(_):
+    # Whether each of Taiga's RabbitMQ takes a connection as its back end makes one (its settings' broker URLs, kombu):
+    # the Celery worker's and the events', one line each, "BROKER <name> ok" or "BROKER <name> <why>", never the URL,
+    # which carries the RabbitMQ account's password. One attempt each: the builder asks again until both take it.
+    from django.conf import settings
+    from kombu import Connection
+    for name, url in (('taiga-async-rabbitmq', settings.CELERY_BROKER_URL), ('taiga-events-rabbitmq', settings.EVENTS_PUSH_BACKEND_URL)):
+        try:
+            with Connection(url, connect_timeout=5) as connection:
+                connection.ensure_connection(max_retries=0)
+            say('BROKER %s ok' % name)
+        except Exception as e:
+            why = (str(e).strip().splitlines() or [type(e).__name__])[0]
+            say('BROKER %s %s' % (name, re.sub(r'amqps?://\S+', 'its address', why)[:160]))
 
 
 def verb_install(p):
@@ -338,14 +356,14 @@ def verb_counts(p):
     say('application tokens %d' % ApplicationToken.objects.count())
 
 
-VERBS = {'version': verb_version, 'install': verb_install, 'accounts': verb_accounts, 'content': verb_content,
+VERBS = {'version': verb_version, 'brokers': verb_brokers, 'install': verb_install, 'accounts': verb_accounts, 'content': verb_content,
          'tidy': verb_tidy, 'list': verb_list, 'token': verb_token, 'counts': verb_counts}
 
 if VERB not in VERBS:
     say('taiga-site.py: no verb %s; one of %s' % (VERB or '(none)', ', '.join(VERBS)))
     sys.exit(2)
 try:
-    VERBS[VERB](payload() if VERB not in ('version',) else {})
+    VERBS[VERB](payload() if VERB not in ('version', 'brokers') else {})
 except Fail as e:
     say('Taiga: %s' % e)
     sys.exit(1)

@@ -64,6 +64,11 @@ two RabbitMQ keep their data in volumes named after the project (`ddev-mysite-ta
 `-taiga-async-rabbitmq`, `-taiga-events-rabbitmq`), which go with it. The project's web container keeps the mail
 catcher, at `https://mysite.ddev.site:8026`, where the site's mail goes.
 
+Before Taiga's installer, on every runtime, the builder waits for up to three minutes until both RabbitMQ take
+connections as Taiga's back end makes them: the installer sends to them, and a broker that is still starting, or
+starting again, refuses it. One that does not take them in time is named, with why and the end of its log, and the
+build stops there.
+
 | Image | What it is | Source and licence |
 | --- | --- | --- |
 | `docker.io/taigaio/taiga-back:6.10.2` | Taiga's back end (Django), and its Celery worker | [taigaio/taiga-back](https://github.com/taigaio/taiga-back), MPL-2.0 |

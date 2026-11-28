@@ -48,6 +48,8 @@ readonly TAIGA_RELEASE='6.10.2';
 
 # The port of Taiga's gateway in the web container, on a runtime other than DDEV (rt_serve).
 readonly TAIGA_SERVE_PORT=8080;
+# How long the builder waits for both RabbitMQ to take connections before Taiga's installer (taiga_brokers_wait).
+readonly TAIGA_BROKERS_WAIT=180;
 
 # The database of the project: Taiga needs PostgreSQL, and its reference pins major version 12.
 readonly TAIGA_DATABASE='postgres:12';
@@ -316,7 +318,39 @@ function taiga_back_exec() {
   fi
 }
 
-# Run a verb of taiga-site.py (version, install, accounts, content, tidy, list, token, counts) with Taiga's own code
+# Wait until both of Taiga's RabbitMQ take connections as its back end makes them (taiga-site.py brokers), for up to
+# TAIGA_BROKERS_WAIT seconds, on every runtime: Taiga's installer sends to them, and a broker that is still starting, or
+# starting again (one restarted for memory on Kubernetes, say), refuses it ("Connection refused"). Each one that does
+# not take them in time is named, with why and the end of its log.
+function taiga_brokers_wait() {
+  local out="" late="" why="" name said="" start="${SECONDS}" ;
+  while : ; do
+    out="$(taiga_site brokers < /dev/null 2> /dev/null | tr -d '\r' | grep '^BROKER ')" ;
+    late="" ; why="" ;
+    for name in taiga-async-rabbitmq taiga-events-rabbitmq ; do
+      printf '%s\n' "${out}" | grep -qx "BROKER ${name} ok" && continue ;
+      late="${late:+${late} }${name}" ;
+      why="${why:+${why}; }${name} ($(printf '%s\n' "${out}" | sed -n "s/^BROKER ${name} //p" | head -1 | grep . || echo 'no answer'))" ;
+    done
+    if [ -z "${late}" ] ; then
+      [ -n "${said}" ] && echo "Taiga's RabbitMQ take connections now, after $(( SECONDS - start )) s." ;
+      return 0 ;
+    fi
+    [ $(( SECONDS - start )) -ge "${TAIGA_BROKERS_WAIT}" ] && break ;
+    [ -z "${said}" ] && { echo "Waiting for Taiga's RabbitMQ before its installer: ${why}." ; said=yes ; } ;
+    sleep 5 ;
+  done
+  if [ -z "${out}" ] ; then
+    echo "Taiga's back end did not answer to ask its RabbitMQ (taiga-async-rabbitmq, taiga-events-rabbitmq) in ${TAIGA_BROKERS_WAIT} s; the end of its log:" ;
+    taiga_service_log taiga-back 20 ;
+  else
+    echo "Taiga's RabbitMQ did not take connections in ${TAIGA_BROKERS_WAIT} s: ${why}. The end of the log of each:" ;
+    for name in ${late} ; do taiga_service_log "${name}" 20 ; done
+  fi
+  return 1 ;
+}
+
+# Run a verb of taiga-site.py (version, brokers, install, accounts, content, tidy, list, token, counts) with Taiga's own code
 # (taiga_back_exec). Its payload (accounts, passwords, a login) travels on the input, never on a command line.
 function taiga_site() {
   local verb="$1" flag="${2:-}" script='/opt/webship/taiga-site.py' ;
@@ -450,6 +484,8 @@ function taiga_build() {
   taiga_wait || exit 1 ;
 
   if [ "${INSTALL}" == 'yes' ] ; then
+    # Taiga's installer sends to its RabbitMQ, which can still be starting (or starting again) when its API answers.
+    taiga_brokers_wait || { echo "Taiga could not be set up." ; exit 1 ; } ;
     echo "Setting Taiga up: the workspace account as the site's administrator." ;
     taiga_install_payload "${account_name}" "${account_mail:-${account_name}@example.com}" "${account_pass}" "${account_name^} Workspace" \
       | taiga_site install || { echo "Taiga could not be set up." ; exit 1 ; } ;

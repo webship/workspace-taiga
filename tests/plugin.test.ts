@@ -176,7 +176,7 @@ test('every shell script parses, and so does the site script', () => {
 });
 
 test('the site script works with Taiga\'s own code in its back end\'s container, and each verb does what it says', () => {
-  for (const name of ['version', 'install', 'accounts', 'content', 'tidy', 'list', 'token', 'counts']) verb(name);
+  for (const name of ['version', 'brokers', 'install', 'accounts', 'content', 'tidy', 'list', 'token', 'counts']) verb(name);
   assert.match(SITE, /^API = 'http:\/\/localhost:8000\/api\/v1'$/m, 'Taiga\'s REST API, from inside its back end\'s container');
   assert.match(SITE, /base64\.b64decode\(raw\)/, 'what it needs comes on its input');
   assert.doesNotMatch(SITE, /sys\.argv/, 'no password on the command line');
@@ -399,6 +399,55 @@ test('on the other runtimes Taiga\'s probe, its site script, its commands and it
     removeTestDir(dir);
   }
   assert.match(fn('taiga_cli_tool'), /taiga_back_exec "python manage\.py \$\(printf '%q ' "\$\{words\[@\]\}"\)" < \/dev\/null ;/, 'Taiga\'s own commands too');
+});
+
+test('before Taiga\'s installer, on every runtime, the builder waits until both RabbitMQ take connections, and names the one that does not', () => {
+  const brokers = verb('brokers');
+  assert.match(brokers, /\('taiga-async-rabbitmq', settings\.CELERY_BROKER_URL\), \('taiga-events-rabbitmq', settings\.EVENTS_PUSH_BACKEND_URL\)/, 'the URLs Taiga itself uses');
+  assert.match(brokers, /connection\.ensure_connection\(max_retries=0\)/, 'one attempt each: the builder asks again');
+  assert.match(brokers, /re\.sub\(r'amqps\?:\/\/\\S\+', 'its address', why\)/, 'never the URL, which carries the password');
+  assert.match(FUN, /^readonly TAIGA_BROKERS_WAIT=180;$/m, 'three minutes');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'taiga-runtimes-'));
+  try {
+    const answers = path.join(dir, 'answers');
+    const count = path.join(dir, 'n');
+    /** The wait, with the site script's answers stood in: each call answers the next line (its two brokers, | between them), the last one again; sleep only moves the clock. */
+    const run = (lines: string[]) => {
+      fs.writeFileSync(answers, lines.join('\n') + '\n');
+      fs.rmSync(count, { force: true });
+      const script = [
+        `source "${path.join(PKG, 'scripts/functions/fun-taiga.sh')}"`,
+        `taiga_site() { local n last ; n=$(( $(cat "${count}" 2> /dev/null || echo 0) + 1 )) ; echo "$n" > "${count}" ; last=$(wc -l < "${answers}") ; [ "$n" -gt "$last" ] && n=$last ; sed -n "\${n}p" "${answers}" | tr '|' '\\n' ; }`,
+        'sleep() { SECONDS=$(( SECONDS + $1 )) ; }',
+        'taiga_service_log() { echo "LOG $1 $2" ; }',
+        `taiga_brokers_wait ; echo "EXIT $? CALLS $(cat "${count}")"`,
+      ].join('\n');
+      const r = spawnSync('bash', ['-c', script], { encoding: 'utf8', input: '' });
+      return r.stdout + r.stderr;
+    };
+    let out = run(['BROKER taiga-async-rabbitmq ok|BROKER taiga-events-rabbitmq ok']);
+    assert.strictEqual(out.trim(), 'EXIT 0 CALLS 1', 'both take connections: nothing to wait for, nothing said');
+    out = run(['BROKER taiga-async-rabbitmq [Errno 111] Connection refused|BROKER taiga-events-rabbitmq ok', '', 'BROKER taiga-async-rabbitmq ok|BROKER taiga-events-rabbitmq ok']);
+    assert.match(out, /^Waiting for Taiga's RabbitMQ before its installer: taiga-async-rabbitmq \(\[Errno 111\] Connection refused\)\.$/m, 'said once, with the one it waits for and why');
+    assert.strictEqual(out.match(/^Waiting for/gm)?.length, 1);
+    assert.match(out, /^Taiga's RabbitMQ take connections now, after 10 s\.$/m, 'a back end that did not answer once is asked again too');
+    assert.match(out, /EXIT 0 CALLS 3$/m);
+    out = run(['BROKER taiga-async-rabbitmq ok|BROKER taiga-events-rabbitmq [Errno -2] Name or service not known']);
+    assert.match(out, /^Taiga's RabbitMQ did not take connections in 180 s: taiga-events-rabbitmq \(\[Errno -2\] Name or service not known\)\. The end of the log of each:$/m, 'the one that did not, named, with why');
+    assert.match(out, /^LOG taiga-events-rabbitmq 20$/m);
+    assert.doesNotMatch(out, /LOG taiga-async-rabbitmq/, 'not the one that did');
+    assert.match(out, /EXIT 1 CALLS 37$/m, 'asked every 5 s for three minutes, then it stops');
+    out = run(['BROKER taiga-async-rabbitmq [Errno 111] Connection refused|BROKER taiga-events-rabbitmq [Errno 111] Connection refused']);
+    assert.match(out, /in 180 s: taiga-async-rabbitmq \(\[Errno 111\] Connection refused\); taiga-events-rabbitmq \(\[Errno 111\] Connection refused\)\. /, 'both, when both did not');
+    assert.match(out, /^LOG taiga-async-rabbitmq 20\nLOG taiga-events-rabbitmq 20$/m);
+    out = run(['']);
+    assert.match(out, /^Taiga's back end did not answer to ask its RabbitMQ \(taiga-async-rabbitmq, taiga-events-rabbitmq\) in 180 s; the end of its log:\nLOG taiga-back 20\nEXIT 1 CALLS 37$/m, 'a back end that never answers: said so, with its log');
+  } finally {
+    removeTestDir(dir);
+  }
+  const build = FUN.slice(FUN.indexOf('  ddev_up start -y < /dev/null || exit 1 ;\n  taiga_wait || exit 1 ;\n'));
+  const wait = build.indexOf('    taiga_brokers_wait || { echo "Taiga could not be set up." ; exit 1 ; } ;\n');
+  assert.ok(wait > 0 && wait < build.indexOf('| taiga_site install'), 'after its API answers and before its installer, whatever the runtime: it stops the build when they do not');
 });
 
 test('Taiga\'s database in the core\'s backups and restores: the core\'s own, no hook of the plugin\'s', () => {
