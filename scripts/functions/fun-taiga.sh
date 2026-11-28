@@ -10,14 +10,21 @@
 #     protected media, the nginx gateway in front of them, and the two RabbitMQ) beside a generic project's web
 #     container, at https://<name>.ddev.site. The database is the project's own db service on PostgreSQL 12, the major
 #     version Taiga's reference pins: Taiga needs PostgreSQL. The project's web container keeps the mail catcher.
-# Docker Compose, Podman, Kubernetes, Lando and Docksal are not proven yet: asked for one, the builder says so and
-# changes nothing.
+#   - Docker Compose, Podman and Kubernetes (--runtime docker|podman|kubernetes), through the core's runtime layer:
+#     Taiga's back-end image is the web container's (rt_stack image). Once the project's PostgreSQL 12 takes
+#     connections, the container runs Taiga's migrations, then its API, its Celery worker and the gateway, as the host
+#     user (taiga-serve.sh, rt_serve), and stops when one of the three stops. Its front end, its events, its protected
+#     media and the two RabbitMQ are services of the project's own (rt_service), under the names they have on DDEV. The
+#     media Taiga keeps beside its database are in the project's taiga/files/media. Why the back end is in the web
+#     container there: it makes its tables as it starts, so it starts once the database answers, and the gateway serves
+#     the media the back end writes, from the same folder.
+# Lando and Docksal are not proven yet: asked for one, the builder says so and changes nothing.
 # The site's accounts, project, roles and token are made with Taiga's own code in its back end's container
 # (taiga-site.py, through Taiga's shell), and its content through Taiga's REST API there, as each part's author. What
 # the script reads (accounts, passwords) comes on its input, never on a command line. Taiga's own images only.
 #
 # The container tool has no project type for Taiga, so a site of this plugin is recognised by a file on DDEV
-# (.ddev/config.taiga.yaml, written by the builder).
+# (.ddev/config.taiga.yaml, written by the builder), and by the plugin's claim on another runtime (rt_claim).
 # Four names are the ones the core's tools look for:
 #   set_taiga_users          the default accounts                     (cmd-tools-add-users.sh <project> taiga)
 #   add_taiga_users          make them, and their roles               (the same tool, and --add-users of the builder)
@@ -36,8 +43,17 @@ readonly TAIGA_EVENTS_IMAGE='docker.io/taigaio/taiga-events:6.10.0';
 readonly TAIGA_PROTECTED_IMAGE='docker.io/taigaio/taiga-protected:6.10.1';
 readonly TAIGA_RABBITMQ_IMAGE='docker.io/library/rabbitmq:3.8.34-management-alpine';
 readonly TAIGA_GATEWAY_IMAGE='docker.io/library/nginx:1.19.10-alpine';
+# RabbitMQ's start off DDEV, with an open-files limit of 65536: Erlang sizes its tables to that limit, and a
+# Kubernetes node (kind's containerd) gives a pod the kernel's highest, 1073741816, with which one RabbitMQ took
+# 1.6 GB and was killed for memory. With Docker's 1024, or 1048576, it takes about 120 MB.
+readonly TAIGA_RABBITMQ_COMMAND="sh -c 'ulimit -n 65536 2> /dev/null ; exec docker-entrypoint.sh rabbitmq-server'";
 # The release the builder runs, as Taiga's back end names it.
 readonly TAIGA_RELEASE='6.10.2';
+
+# The port of Taiga's gateway in the web container, on a runtime other than DDEV (rt_serve).
+readonly TAIGA_SERVE_PORT=8080;
+# How long the builder waits for both RabbitMQ to take connections before Taiga's installer (taiga_brokers_wait).
+readonly TAIGA_BROKERS_WAIT=180;
 
 # The database of the project: Taiga needs PostgreSQL, and its reference pins major version 12.
 readonly TAIGA_DATABASE='postgres:12';
@@ -47,7 +63,7 @@ readonly TAIGA_DATABASE='postgres:12';
 readonly TAIGA_PROJECT_NAME='Webship site';
 readonly TAIGA_FILES='taiga';
 
-# The free memory a build asks for, in MB: Taiga's nine services and PostgreSQL.
+# The free memory a build asks for, in MB: Taiga's services and PostgreSQL.
 readonly TAIGA_MEMORY_MB=2048;
 
 # The default accounts, the ones a scenario signs in as, each with a role in the sample project: its administrator
@@ -74,12 +90,15 @@ function taiga_runtime() {
   if declare -f runtime_of > /dev/null ; then runtime_of "$@" ; else echo 'ddev' ; fi
 }
 
-# The address of the site in this folder (or of a new build named PROJECT_NAME, on DDEV).
+# The address of the site in this folder (or of a new build named PROJECT_NAME, on DDEV); on another runtime the one
+# the runtime gives it.
 function taiga_url() {
+  if [ "$(taiga_runtime)" != 'ddev' ] && declare -f rt_url > /dev/null ; then rt_url ; return ; fi
   echo "https://${1:-${PROJECT_NAME}}.ddev.site" ;
 }
 
-# Is this folder a Taiga site of this plugin? On DDEV the builder leaves .ddev/config.taiga.yaml in it.
+# Is this folder a Taiga site of this plugin? On DDEV the builder leaves .ddev/config.taiga.yaml in it; on another
+# runtime the project carries the plugin's claim.
 function taiga_is_project() {
   local project_path="$1" ;
   [ -f "${project_path}/.ddev/config.taiga.yaml" ] && return 0 ;
@@ -103,13 +122,17 @@ function taiga_enter_project() {
 }
 
 # The site's copy of the plugin's scripts (taiga/), brought up to the installed plugin's, so a plugin updated with
-# --install reaches the sites built before it. The site's own values (taiga/*.env) are left as they are.
+# --install reaches the sites built before it: the site script, and on another runtime than DDEV the web container's
+# start and its gateway's settings (taken when the project starts again). The site's own values (taiga/*env) are left
+# as they are.
 function taiga_refresh_files() {
-  local project_path="$1" from="${WORKSPACE_SCRIPTS}/plugins/taiga" f ;
+  local project_path="$1" from="${WORKSPACE_SCRIPTS}/plugins/taiga" f to ;
   [ -d "${project_path}/${TAIGA_FILES}" ] || return 0 ;
-  for f in taiga-site.py ; do
-    if [ -f "${from}/${f}" ] && ! cmp -s "${from}/${f}" "${project_path}/${TAIGA_FILES}/${f}" ; then
-      cp "${from}/${f}" "${project_path}/${TAIGA_FILES}/${f}" || return 1 ;
+  for f in taiga-site.py:taiga-site.py taiga-serve.sh:taiga-serve.sh taiga-proxy.conf:nginx.conf ; do
+    to="${project_path}/${TAIGA_FILES}/${f#*:}" ; f="${from}/${f%%:*}" ;
+    [ "${to##*/}" = 'taiga-site.py' ] || [ -f "${to}" ] || continue ;
+    if [ -f "${f}" ] && ! cmp -s "${f}" "${to}" ; then
+      cp "${f}" "${to}" || return 1 ;
     fi
   done
 }
@@ -124,12 +147,14 @@ function taiga_secret() {
   head -c 400 /dev/urandom | base64 -w0 | tr -dc 'A-Za-z0-9' | head -c "$1" ;
 }
 
-# Write the project's files: Taiga's services (.ddev/docker-compose.taiga.yaml), their pinned images in .ddev/.env, the
-# claim (.ddev/config.taiga.yaml), the gateway's routes and the plugin's script.
+# Write the project's files. On DDEV: Taiga's services (.ddev/docker-compose.taiga.yaml), their pinned images in
+# .ddev/.env, the claim (.ddev/config.taiga.yaml), the gateway's routes and the plugin's script. On another runtime: the
+# plugin's claim, the web container built from Taiga's back-end image and started by taiga-serve.sh, the gateway's
+# settings, and Taiga's other services as services of the project's own.
 function taiga_write_config() {
-  local project_path="$1" ;
+  local project_path="$1" runtime="${2:-ddev}" ;
   local from="${WORKSPACE_SCRIPTS}/plugins/taiga" f ;
-  for f in docker-compose.taiga.yaml taiga-gateway.conf taiga-site.py ; do
+  for f in docker-compose.taiga.yaml taiga-gateway.conf taiga-site.py taiga-serve.sh taiga-proxy.conf ; do
     if [ ! -f "${from}/${f}" ] ; then
       echo "${f} is not in ${from}: install the plugin (plugins.sh --install taiga)." ;
       return 1 ;
@@ -137,8 +162,46 @@ function taiga_write_config() {
   done
   mkdir -p "${project_path}/${TAIGA_FILES}" || return 1 ;
   cp "${from}/taiga-site.py" "${project_path}/${TAIGA_FILES}/" || return 1 ;
+
+  if [ "${runtime}" != 'ddev' ] ; then
+    cp "${from}/taiga-serve.sh" "${project_path}/${TAIGA_FILES}/" || return 1 ;
+    cp "${from}/taiga-proxy.conf" "${project_path}/${TAIGA_FILES}/nginx.conf" || return 1 ;
+    # The site's values are there from the start, only their owner's: taiga_write_env fills them once the runtime has
+    # given the project its address.
+    for f in env rabbitmq.env front.env events.env protected.env ; do
+      ( umask 077 && : >> "${project_path}/${TAIGA_FILES}/${f}" ) || return 1 ;
+    done
+    ( cd "${project_path}" \
+      && rt_claim taiga \
+      && rt_stack image "${TAIGA_BACK_IMAGE}" \
+      && rt_web_build taiga <<'DOCKEREOF'
+# Taiga's back-end image is the web container's here (rt_stack image): the stack's start runs Taiga's API, its Celery
+# worker and the gateway (nginx) in it as the host user (taiga/taiga-serve.sh, rt_serve), not the image's own start,
+# which runs them as its taiga user. The media Taiga keeps beside its database live in the project's taiga/files/media.
+ENTRYPOINT []
+RUN apt-get update && apt-get install -y --no-install-recommends nginx && rm -rf /var/lib/apt/lists/* \
+  && rm -rf /taiga-back/media && ln -s /var/www/html/taiga/files/media /taiga-back/media
+DOCKEREOF
+    ) || return 1 ;
+    # Taiga's other services under the names they have on DDEV, so the site's values are the same: each RabbitMQ keeps
+    # its data in a volume of its own, under a node name that stays when its container gets another host name.
+    ( cd "${project_path}" \
+      && rt_service taiga-front "${TAIGA_FRONT_IMAGE}" --port 80 --env-file "${TAIGA_FILES}/front.env" \
+      && rt_service taiga-events "${TAIGA_EVENTS_IMAGE}" --port 8888 --env-file "${TAIGA_FILES}/events.env" \
+      && rt_service taiga-protected "${TAIGA_PROTECTED_IMAGE}" --port 8003 --env-file "${TAIGA_FILES}/protected.env" \
+      && rt_service taiga-events-rabbitmq "${TAIGA_RABBITMQ_IMAGE}" --port 5672 --env-file "${TAIGA_FILES}/rabbitmq.env" --volume /var/lib/rabbitmq \
+        --command "${TAIGA_RABBITMQ_COMMAND}" \
+      && rt_service taiga-async-rabbitmq "${TAIGA_RABBITMQ_IMAGE}" --port 5672 --env-file "${TAIGA_FILES}/rabbitmq.env" --volume /var/lib/rabbitmq \
+        --command "${TAIGA_RABBITMQ_COMMAND}" \
+      && rt_serve "${TAIGA_SERVE_PORT}" "bash ${TAIGA_FILES}/taiga-serve.sh" ) || return 1 ;
+    return 0 ;
+  fi
+
   cp "${from}/taiga-gateway.conf" "${project_path}/${TAIGA_FILES}/gateway.conf" || return 1 ;
   cp "${from}/docker-compose.taiga.yaml" "${project_path}/.ddev/docker-compose.taiga.yaml" || return 1 ;
+  # Taiga's media in the project folder, made by the project's user before the services start (a folder Docker made for
+  # the mount would be root's).
+  mkdir -p "${project_path}/${TAIGA_FILES}/files/media" || return 1 ;
   printf '%s\n' "TAIGA_BACK_IMAGE=${TAIGA_BACK_IMAGE}" "TAIGA_FRONT_IMAGE=${TAIGA_FRONT_IMAGE}" "TAIGA_EVENTS_IMAGE=${TAIGA_EVENTS_IMAGE}" \
     "TAIGA_PROTECTED_IMAGE=${TAIGA_PROTECTED_IMAGE}" "TAIGA_RABBITMQ_IMAGE=${TAIGA_RABBITMQ_IMAGE}" "TAIGA_GATEWAY_IMAGE=${TAIGA_GATEWAY_IMAGE}" \
     > "${project_path}/.ddev/.env" || return 1 ;
@@ -150,12 +213,21 @@ web_environment:
 YAMLEOF
 }
 
-# The site's own values (taiga/*.env, which only you can read): the address, the project's database, the mail catcher,
+# The site's own values (taiga/*env, which only you can read): the address, the project's database, the mail catcher,
 # the RabbitMQ account and the secret key the back end, the events and the protected media share. Taiga's telemetry is
-# off, and so is its public sign-up.
+# off, and so is its public sign-up. On another runtime than DDEV: the stack's own mail catcher (mail), and at a plain
+# http address Taiga's cookies without Secure (a browser keeps none of them otherwise) and its events over ws://; each
+# RabbitMQ's node name is its own host, so its data stays its own when its container gets another host name.
 function taiga_write_env() {
-  local project_path="$1" base_url="$2" ;
-  local host="${base_url#https://}" secret rabbit cookie ;
+  local project_path="$1" base_url="$2" runtime="${3:-ddev}" ;
+  local scheme="${base_url%%://*}" host="${base_url#*://}" mail='web' ws='wss' cookies='' node='' secret rabbit cookie ;
+  host="${host%/}" ;
+  if [ "${runtime}" != 'ddev' ] ; then
+    mail='mail' ; node=$'\nRABBITMQ_NODENAME=rabbit@localhost' ;
+  fi
+  if [ "${scheme}" = 'http' ] ; then
+    ws='ws' ; cookies=$'\nSESSION_COOKIE_SECURE=False\nCSRF_COOKIE_SECURE=False' ;
+  fi
   secret="$(taiga_secret 50)" ; rabbit="$(taiga_secret 24)" ; cookie="$(taiga_secret 32)" ;
   ( umask 077
     cat > "${project_path}/${TAIGA_FILES}/env" <<ENVEOF
@@ -166,31 +238,31 @@ POSTGRES_USER=db
 POSTGRES_PASSWORD=db
 POSTGRES_HOST=db
 TAIGA_SECRET_KEY=${secret}
-TAIGA_SITES_SCHEME=https
+TAIGA_SITES_SCHEME=${scheme}
 TAIGA_SITES_DOMAIN=${host}
 TAIGA_SUBPATH=
 EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
 DEFAULT_FROM_EMAIL=taiga@example.com
 EMAIL_USE_TLS=False
 EMAIL_USE_SSL=False
-EMAIL_HOST=web
+EMAIL_HOST=${mail}
 EMAIL_PORT=1025
 EMAIL_HOST_USER=
 EMAIL_HOST_PASSWORD=
 RABBITMQ_USER=taiga
 RABBITMQ_PASS=${rabbit}
 ENABLE_TELEMETRY=False
-PUBLIC_REGISTER_ENABLED=False
+PUBLIC_REGISTER_ENABLED=False${cookies}
 ENVEOF
     cat > "${project_path}/${TAIGA_FILES}/rabbitmq.env" <<ENVEOF
 RABBITMQ_ERLANG_COOKIE=${cookie}
 RABBITMQ_DEFAULT_USER=taiga
 RABBITMQ_DEFAULT_PASS=${rabbit}
-RABBITMQ_DEFAULT_VHOST=taiga
+RABBITMQ_DEFAULT_VHOST=taiga${node}
 ENVEOF
     cat > "${project_path}/${TAIGA_FILES}/front.env" <<ENVEOF
 TAIGA_URL=${base_url}
-TAIGA_WEBSOCKETS_URL=wss://${host}
+TAIGA_WEBSOCKETS_URL=${ws}://${host}
 TAIGA_SUBPATH=
 PUBLIC_REGISTER_ENABLED=false
 ENVEOF
@@ -208,9 +280,11 @@ ENVEOF
 }
 
 # The answer of Taiga's API through its gateway, asked inside the project's network from the web container: 200 once
-# the back end has made its tables and started.
+# the back end has made its tables and started. On another runtime than DDEV the gateway is in the web container.
 function taiga_probe() {
-  ddev exec "curl -s -o /dev/null -m 15 -w '%{http_code}' http://taiga-gateway/api/v1/" < /dev/null 2>/dev/null | tr -d '\r' | tail -1 ;
+  local gateway='http://taiga-gateway' ;
+  [ "$(taiga_runtime)" != 'ddev' ] && gateway="http://127.0.0.1:${TAIGA_SERVE_PORT}" ;
+  ddev exec "curl -s -o /dev/null -m 15 -w '%{http_code}' ${gateway}/api/v1/" < /dev/null 2>/dev/null | tr -d '\r' | tail -1 ;
 }
 
 # Wait until the site answers, in the project's folder: up to ten minutes (the first start makes Taiga's tables).
@@ -222,15 +296,75 @@ function taiga_wait() {
     sleep 3 ;
   done
   echo "Taiga did not answer (its API: ${code:-none}); the end of its back end's log:" ;
-  ddev logs -s taiga-back --tail 40 < /dev/null 2>/dev/null ;
+  taiga_service_log taiga-back 40 ;
   return 1 ;
 }
 
-# Run a verb of taiga-site.py (version, install, accounts, content, tidy, list, token, counts) with Taiga's own code in
-# its back end's container. Its payload (accounts, passwords, a login) travels on the input, never on a command line.
+# The end of the log of a service of the project in this folder (taiga-back, taiga-front, taiga-events, ...): DDEV's
+# for its services; on another runtime the runtime's own, as the runtime layer runs the project, where the back end is
+# the web container.
+function taiga_service_log() {
+  local service="$1" lines="$2" found rt root ;
+  if [ "$(taiga_runtime)" = 'ddev' ] ; then ddev logs -s "${service}" --tail "${lines}" < /dev/null 2>/dev/null ; return 0 ; fi
+  [ "${service}" = 'taiga-back' ] && service='web' ;
+  found="$(rt_find_project "$PWD" 2>/dev/null)" || return 0 ;
+  rt="${found%% *}" ; root="${found#* }" ;
+  case "${rt}" in
+    docker|podman) rt_dc "${rt}" "${root}" logs --tail "${lines}" "${service}" < /dev/null 2>/dev/null ;;
+    kubernetes) rt_kubectl -n "$(rt_k8s_ns "${root}")" logs "deploy/${service}" --tail "${lines}" < /dev/null 2>/dev/null ;;
+  esac
+  return 0 ;
+}
+
+# A command line with Taiga's back-end code, in the project in this folder: in the back end's container on DDEV; on
+# another runtime in the web container, which is built from the same image, with the site's values and the image's own
+# Python.
+function taiga_back_exec() {
+  if [ "$(taiga_runtime)" = 'ddev' ] ; then
+    ddev exec -s taiga-back "cd /taiga-back && ${1}" ;
+  else
+    ddev exec "set -a ; . /var/www/html/${TAIGA_FILES}/env ; set +a ; export PATH=/opt/venv/bin:\$PATH DJANGO_SETTINGS_MODULE=settings.config ; cd /taiga-back && ${1}" ;
+  fi
+}
+
+# Wait until both of Taiga's RabbitMQ take connections as its back end makes them (taiga-site.py brokers), for up to
+# TAIGA_BROKERS_WAIT seconds, on every runtime: Taiga's installer sends to them, and a broker that is still starting, or
+# starting again (one restarted for memory on Kubernetes, say), refuses it ("Connection refused"). Each one that does
+# not take them in time is named, with why and the end of its log.
+function taiga_brokers_wait() {
+  local out="" late="" why="" name said="" start="${SECONDS}" ;
+  while : ; do
+    out="$(taiga_site brokers < /dev/null 2> /dev/null | tr -d '\r' | grep '^BROKER ')" ;
+    late="" ; why="" ;
+    for name in taiga-async-rabbitmq taiga-events-rabbitmq ; do
+      printf '%s\n' "${out}" | grep -qx "BROKER ${name} ok" && continue ;
+      late="${late:+${late} }${name}" ;
+      why="${why:+${why}; }${name} ($(printf '%s\n' "${out}" | sed -n "s/^BROKER ${name} //p" | head -1 | grep . || echo 'no answer'))" ;
+    done
+    if [ -z "${late}" ] ; then
+      [ -n "${said}" ] && echo "Taiga's RabbitMQ take connections now, after $(( SECONDS - start )) s." ;
+      return 0 ;
+    fi
+    [ $(( SECONDS - start )) -ge "${TAIGA_BROKERS_WAIT}" ] && break ;
+    [ -z "${said}" ] && { echo "Waiting for Taiga's RabbitMQ before its installer: ${why}." ; said=yes ; } ;
+    sleep 5 ;
+  done
+  if [ -z "${out}" ] ; then
+    echo "Taiga's back end did not answer to ask its RabbitMQ (taiga-async-rabbitmq, taiga-events-rabbitmq) in ${TAIGA_BROKERS_WAIT} s; the end of its log:" ;
+    taiga_service_log taiga-back 20 ;
+  else
+    echo "Taiga's RabbitMQ did not take connections in ${TAIGA_BROKERS_WAIT} s: ${why}. The end of the log of each:" ;
+    for name in ${late} ; do taiga_service_log "${name}" 20 ; done
+  fi
+  return 1 ;
+}
+
+# Run a verb of taiga-site.py (version, brokers, install, accounts, content, tidy, list, token, counts) with Taiga's own code
+# (taiga_back_exec). Its payload (accounts, passwords, a login) travels on the input, never on a command line.
 function taiga_site() {
-  local verb="$1" flag="${2:-}" ;
-  ddev exec -s taiga-back "cd /taiga-back && TAIGA_SITE_VERB=${verb} TAIGA_SITE_FLAG=${flag} python manage.py shell -c \"exec(open('/opt/webship/taiga-site.py').read())\"" ;
+  local verb="$1" flag="${2:-}" script='/opt/webship/taiga-site.py' ;
+  [ "$(taiga_runtime)" != 'ddev' ] && script="/var/www/html/${TAIGA_FILES}/taiga-site.py" ;
+  taiga_back_exec "TAIGA_SITE_VERB=${verb} TAIGA_SITE_FLAG=${flag} python manage.py shell -c \"exec(open('${script}').read())\"" ;
 }
 
 # The release Taiga's back end says it runs.
@@ -280,8 +414,19 @@ function taiga_build() {
   local project_path="${WORKSPACE_ROOT}/${doc_name}/${PROJECT_NAME}" ;
   local runtime ; runtime="$(cd "${WORKSPACE_ROOT}/${doc_name}" && taiga_runtime)" ;
 
-  if [ "${runtime}" != 'ddev' ] ; then
-    echo "Taiga builds on DDEV for now (--runtime ddev), not on ${runtime}: that runtime is not proven for it yet. Nothing was changed." ;
+  case "${runtime}" in
+    ddev|docker|podman|kubernetes) ;;
+    *) echo "Taiga builds on DDEV, Docker Compose, Podman and Kubernetes for now (--runtime ddev, docker, podman or kubernetes), not on ${runtime}: that runtime is not proven for it yet. Nothing was changed." ; exit 1 ;;
+  esac
+  if [ "${runtime}" != 'ddev' ] && { ! declare -f rt_serve > /dev/null || ! declare -f rt_service > /dev/null ; } ; then
+    echo "--runtime ${runtime} needs a Webship Workspace whose runtimes serve an application of its own and its services (rt_serve and rt_service, webship/workspace#841 and #900): update the workspace, or build on DDEV. Nothing was changed." ;
+    exit 1 ;
+  fi
+  # Taiga's events service stops on its own in normal use (a page that closes its websocket right after subscribing), and
+  # comes back only where the runtime starts it again: on Docker Compose and Podman that is the core's restart policy of
+  # a project's own services (webship/workspace#959); Kubernetes starts it again by itself.
+  if { [ "${runtime}" = 'docker' ] || [ "${runtime}" = 'podman' ] ; } && ! declare -f rt_service_restart > /dev/null ; then
+    echo "--runtime ${runtime} needs a Webship Workspace that starts a project's own services again when they stop on their own (rt_service_restart, webship/workspace#959, core 1.0.45): Taiga's events service stops on its own when a page closes its websocket early. Update the workspace, or build on DDEV or Kubernetes. Nothing was changed." ;
     exit 1 ;
   fi
   if [ "${ADD_USERS}" == 'yes' ] && [ "${INSTALL}" != 'yes' ] ; then
@@ -302,7 +447,7 @@ function taiga_build() {
   fi
   local free ; free="$(taiga_free_memory)" ;
   if [ -n "${free}" ] && [ "${free}" -lt "${TAIGA_MEMORY_MB}" ] ; then
-    echo "Taiga needs about ${TAIGA_MEMORY_MB} MB of free memory (its nine services and PostgreSQL); this machine has ${free} MB available now. Stop a site you do not need, then build again. Nothing was changed." ;
+    echo "Taiga needs about ${TAIGA_MEMORY_MB} MB of free memory (its services and PostgreSQL); this machine has ${free} MB available now. Stop a site you do not need, then build again. Nothing was changed." ;
     exit 1 ;
   fi
 
@@ -322,17 +467,34 @@ function taiga_build() {
   mkdir -p "${PROJECT_NAME}" ;
   cd "${project_path}" || exit 1 ;
 
-  ddev config --project-type=generic --project-name=${PROJECT_NAME} --database=${TAIGA_DATABASE} \
-    --nodejs-version=$(ddev_nodejs_version) < /dev/null || exit 1 ;
-  taiga_write_config "${project_path}" || exit 1 ;
+  if [ "${runtime}" = 'ddev' ] ; then
+    ddev config --project-type=generic --project-name=${PROJECT_NAME} --database=${TAIGA_DATABASE} \
+      --nodejs-version=$(ddev_nodejs_version) < /dev/null || exit 1 ;
+  else
+    # The runtime's own project: Docker Compose, Podman or Kubernetes, through the runtime layer, on PostgreSQL 12 too.
+    ddev config --project-type=generic --webserver-type=generic --project-name=${PROJECT_NAME} --database=${TAIGA_DATABASE} --auto < /dev/null || exit 1 ;
+  fi
+  taiga_write_config "${project_path}" "${runtime}" || exit 1 ;
+  # The address once the runtime has given the project its port.
   local base_url ; base_url="$(taiga_url)" ;
-  taiga_write_env "${project_path}" "${base_url}" || exit 1 ;
+  taiga_write_env "${project_path}" "${base_url}" "${runtime}" || exit 1 ;
+  # Kubernetes takes the services' env files into Secrets of the project's own when the runtime writes the project's
+  # files: once more, now that the site's values are there (Docker Compose and Podman read them when the project starts).
+  if [ "${runtime}" = 'kubernetes' ] ; then
+    ( cd "${project_path}" && ddev config < /dev/null > /dev/null ) || exit 1 ;
+  fi
 
-  echo "Starting the project, PostgreSQL 12 and Taiga ${TAIGA_RELEASE}'s services: their images are a download of about 1.3 GB the first time, and the first start makes Taiga's tables." ;
+  if [ "${runtime}" = 'ddev' ] ; then
+    echo "Starting the project, PostgreSQL 12 and Taiga ${TAIGA_RELEASE}'s services: their images are a download of about 1.3 GB the first time, and the first start makes Taiga's tables." ;
+  else
+    echo "Starting the project, PostgreSQL 12 and Taiga ${TAIGA_RELEASE}'s services: their images are a download of about 1.3 GB the first time, the project's web image is built from Taiga's back end, and the first start makes Taiga's tables." ;
+  fi
   ddev_up start -y < /dev/null || exit 1 ;
   taiga_wait || exit 1 ;
 
   if [ "${INSTALL}" == 'yes' ] ; then
+    # Taiga's installer sends to its RabbitMQ, which can still be starting (or starting again) when its API answers.
+    taiga_brokers_wait || { echo "Taiga could not be set up." ; exit 1 ; } ;
     echo "Setting Taiga up: the workspace account as the site's administrator." ;
     taiga_install_payload "${account_name}" "${account_mail:-${account_name}@example.com}" "${account_pass}" "${account_name^} Workspace" \
       | taiga_site install || { echo "Taiga could not be set up." ; exit 1 ; } ;
@@ -449,9 +611,9 @@ function taiga_cli_tool() {
   taiga_wait > /dev/null || { echo "Taiga of ${PROJECT_NAME} does not answer; start it again (ddev restart in ${doc_name}/${PROJECT_NAME})." ; exit 1 ; } ;
 
   if [ ! "${RUN}" == '_none_' ] ; then
-    # One of Taiga's own management commands (python manage.py <command>), in its back end's container.
+    # One of Taiga's own management commands (python manage.py <command>), with its back end's code.
     local words ; read -r -a words <<< "${RUN}" ;
-    ddev exec -s taiga-back "cd /taiga-back && python manage.py $(printf '%q ' "${words[@]}")" < /dev/null ;
+    taiga_back_exec "python manage.py $(printf '%q ' "${words[@]}")" < /dev/null ;
     exit $? ;
   fi
 

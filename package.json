@@ -64,6 +64,8 @@
         "scripts/docker-compose.taiga.yaml",
         "scripts/taiga-gateway.conf",
         "scripts/taiga-site.py",
+        "scripts/taiga-serve.sh",
+        "scripts/taiga-proxy.conf",
         "testing/site.feature"
       ]
     },
@@ -85,8 +87,10 @@
       ]
     },
     "features": [
-      "features/taiga.feature"
-    ]
+      "features/taiga.feature",
+      "features/taiga-runtimes.feature"
+    ],
+    "featuresSite": "cmd-taiga-project.sh ci-taiga --install --add-users --sample-content --runtime docker"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

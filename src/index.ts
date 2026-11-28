@@ -47,7 +47,7 @@ export function assistantContext(): string {
     'Taiga (a plugin, @webship.co/workspace-taiga), the open-source agile project management platform: a site is built with',
     '`bash cmd-taiga-project.sh <name> --install --add-users --sample-content` from a sites folder (dev, test, sandboxes, demos):',
     'Taiga 6.10\'s own images as its reference setup runs them (its back end, the back end\'s Celery worker, its front end, its events, its protected media, the nginx gateway and two RabbitMQ), every image pinned,',
-    'on the project\'s own PostgreSQL 12 (Taiga needs PostgreSQL), on DDEV at https://<name>.ddev.site; other runtimes are not proven for it yet.',
+    'on the project\'s own PostgreSQL 12 (Taiga needs PostgreSQL), on DDEV at https://<name>.ddev.site, or with `--runtime docker`, `podman` or `kubernetes` at the address the runtime gives it (the build says it).',
     'The builder asks for 2 GB of free memory before it starts. Taiga\'s telemetry is off, and so is its public sign-up.',
     '`--install` makes the workspace account the site\'s administrator;',
     '`--add-users` adds the default accounts in their roles of the Scrum project Webship site (owner: its administrator, as Product Owner; member: a member, as Back; reader: a reader that only views; stranger: not in it), each @example.com, signing in with its username;',
