@@ -103,7 +103,8 @@ administrator makes the accounts.
   the project's own. Their images' own starts first make `/taiga-back` the taiga user's, which only root may: the back
   end starts as the reference's does without that step (the migrations, the project templates, then the API), and the
   worker keeps its schedule in `/tmp`. Celery takes a worker whose group has no name in the image for root and will not
-  start it with Taiga's pickled messages: `C_FORCE_ROOT` lets it start, as the project's user, not root.
+  start it with Taiga's pickled messages: `C_FORCE_ROOT` lets it start, as the project's user, not root. That turns
+  Celery's own check off, so the worker's start refuses root itself first.
 - **Taiga's media are in the project folder** (`taiga/files/media`, mounted where the reference mounts a media volume):
   the row's Backup holds them, and removing the project removes them.
 

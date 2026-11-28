@@ -57,11 +57,11 @@ services:
     <<: *taiga-back
     container_name: ddev-${DDEV_SITENAME}-taiga-async
     # The image's own worker start, without the owner step either, and with its schedule where the project's user may
-    # write it.
-    entrypoint: ["celery", "-A", "taiga.celery", "worker", "-B", "--concurrency", "4", "-l", "INFO", "--schedule", "/tmp/taiga-celerybeat-schedule"]
-    # Celery takes a worker whose group has no name in the image (the project's GID is not in its /etc/group) for root,
-    # and then will not take Taiga's pickled messages ("Running a worker with superuser privileges ..."). It runs as the
-    # project's user, not root: C_FORCE_ROOT only lets it start.
+    # write it. Celery takes a worker whose group has no name in the image (the project's GID is not in its /etc/group)
+    # for root, and then will not take Taiga's pickled messages ("Running a worker with superuser privileges ..."):
+    # C_FORCE_ROOT lets it start, which turns that check off for good, so the start itself refuses root first (the
+    # doubled dollar is compose's own).
+    entrypoint: ["bash", "-c", "[ \"$$(id -u)\" != 0 ] || { echo \"The worker must not run as root\" ; exit 1 ; } ; exec celery -A taiga.celery worker -B --concurrency 4 -l INFO --schedule /tmp/taiga-celerybeat-schedule"]
     environment:
       HOME: /tmp
       C_FORCE_ROOT: "true"

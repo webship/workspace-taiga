@@ -253,7 +253,15 @@ test('Taiga\'s reference setup on DDEV: every image pinned, the four changes fro
   assert.match(back, /\n    - \$\{DDEV_APPROOT\}\/taiga\/files\/media:\/taiga-back\/media\n/, 'their media in the project folder');
   assert.match(back, /\n    HOME: \/tmp\n/);
   assert.match(service('taiga-back'), /entrypoint: \["bash", "-c", "set -euo pipefail ; python manage\.py migrate ; python manage\.py loaddata initial_project_templates ; exec gunicorn taiga\.wsgi:application --name taiga_api --bind 0\.0\.0\.0:8000 --workers 3 --worker-tmp-dir \/dev\/shm --log-level=info --access-logfile -"\]/, 'the image\'s start without its owner step');
-  assert.match(service('taiga-async'), /entrypoint: \["celery", "-A", "taiga\.celery", "worker", "-B", "--concurrency", "4", "-l", "INFO", "--schedule", "\/tmp\/taiga-celerybeat-schedule"\]/, 'the worker\'s too, its schedule in /tmp');
+  assert.ok(service('taiga-async').includes('entrypoint: ["bash", "-c", "[ \\"$$(id -u)\\" != 0 ] || { echo \\"The worker must not run as root\\" ; exit 1 ; } ; exec celery -A taiga.celery worker -B --concurrency 4 -l INFO --schedule /tmp/taiga-celerybeat-schedule"]'), 'the worker\'s start too, its schedule in /tmp, and it refuses root before Celery starts');
+  // Wherever C_FORCE_ROOT is set, on any runtime, the worker's start refuses root before Celery starts: it turns
+  // Celery's own check off for good.
+  for (const f of [...manifest.scripts.machine, ...manifest.scripts.functions]) {
+    const src = read(f);
+    if (!src.includes('C_FORCE_ROOT')) continue;
+    const guard = src.indexOf('!= 0 ] || { echo ');
+    assert.ok(guard > 0 && src.indexOf('The worker must not run as root', guard) > guard && src.indexOf('exit 1', guard) > guard && src.indexOf('exec celery', guard) > guard, `${f} sets C_FORCE_ROOT, and its worker\'s start refuses root before Celery`);
+  }
   assert.doesNotMatch(COMPOSE, /gosu|chown|async_entrypoint/, 'nothing that only root may do');
   assert.match(service('taiga-async'), /takes a worker whose group has no name in the image[^]*\n    environment:\n      HOME: \/tmp\n      C_FORCE_ROOT: "true"\n/, 'the worker starts as the project\'s user, which Celery takes for root without a group name, and the compose file says why');
   assert.match(service('taiga-gateway'), /\n      - \$\{DDEV_APPROOT\}\/taiga\/files\/media:\/taiga\/media:ro\n/, 'the gateway reads the media from the project folder');
