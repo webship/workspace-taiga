@@ -58,11 +58,13 @@ function written(runtime: string, address: string): { calls: string[], dockerfil
     const r = spawnSync('bash', ['-c', script], { encoding: 'utf8', env: { ...process.env, WORKSPACE_SCRIPTS: path.join(dir, 'scripts'), LOG: path.join(dir, 'calls.log') } });
     assert.strictEqual(r.status, 0, r.stdout + r.stderr);
     const log = path.join(dir, 'calls.log');
-    const list = (d: string): string[] => fs.readdirSync(path.join(project, d)).map((f) => `${d}/${f}`);
+    // A folder is listed with a slash, and only its name.
+    const list = (d: string): string[] => fs.readdirSync(path.join(project, d)).map((f) => `${d}/${f}${fs.statSync(path.join(project, d, f)).isDirectory() ? '/' : ''}`);
     const files = [...list('.ddev'), ...list('taiga')].sort();
     const contents: Record<string, string> = {};
     const modes: Record<string, number> = {};
-    for (const f of files) { contents[f] = fs.readFileSync(path.join(project, f), 'utf8'); modes[f] = fs.statSync(path.join(project, f)).mode & 0o777; }
+    for (const f of files.filter((x) => !x.endsWith('/'))) { contents[f] = fs.readFileSync(path.join(project, f), 'utf8'); modes[f] = fs.statSync(path.join(project, f)).mode & 0o777; }
+    if (fs.existsSync(path.join(project, 'taiga', 'files', 'media'))) files.push('taiga/files/media/');
     return {
       calls: fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n') : [],
       dockerfile: fs.existsSync(`${log}.dockerfile`) ? fs.readFileSync(`${log}.dockerfile`, 'utf8') : '',
@@ -230,7 +232,7 @@ test('the runtimes: DDEV, Docker Compose, Podman and Kubernetes; another is refu
   assert.match(read('README.md'), /\*\*The database is PostgreSQL 12\.\*\* Taiga needs PostgreSQL/, 'the README says why and which');
 });
 
-test('Taiga\'s reference setup on DDEV: every image pinned, the two changes from it said, the data in volumes named after the project', () => {
+test('Taiga\'s reference setup on DDEV: every image pinned, the four changes from it said, the data in volumes named after the project, the media in its folder', () => {
   const images: Record<string, string> = {
     TAIGA_BACK_IMAGE: 'docker.io/taigaio/taiga-back:6.10.2', TAIGA_FRONT_IMAGE: 'docker.io/taigaio/taiga-front:6.10.3',
     TAIGA_EVENTS_IMAGE: 'docker.io/taigaio/taiga-events:6.10.0', TAIGA_PROTECTED_IMAGE: 'docker.io/taigaio/taiga-protected:6.10.1',
@@ -246,8 +248,17 @@ test('Taiga\'s reference setup on DDEV: every image pinned, the two changes from
   assert.match(service('taiga-events'), /taiga-events 6\.10\.0 exits on an unhandled rejection/, 'and the compose file says why');
   assert.match(service('taiga-async'), /taiga-back:\n\s+condition: service_started/, 'the worker starts after the back end');
   assert.match(service('taiga-async'), /mkdir …\/_data\/img: file exists/, 'and the compose file says why');
-  assert.match(service('taiga-async'), /entrypoint: \["\/taiga-back\/docker\/async_entrypoint\.sh"\]/);
-  for (const v of ['static', 'media', 'async-rabbitmq', 'events-rabbitmq']) assert.ok(COMPOSE.includes(`name: ddev-\${DDEV_SITENAME}-taiga-${v}`), `the ${v} volume is named after the project`);
+  const back = COMPOSE.slice(COMPOSE.indexOf('x-taiga-back: &taiga-back'), COMPOSE.indexOf('x-rabbitmq: &rabbitmq'));
+  assert.match(back, /\n  user: "\$\{DDEV_UID\}:\$\{DDEV_GID\}"\n/, 'the back end and its worker as the project\'s user');
+  assert.match(back, /\n    - \$\{DDEV_APPROOT\}\/taiga\/files\/media:\/taiga-back\/media\n/, 'their media in the project folder');
+  assert.match(back, /\n    HOME: \/tmp\n/);
+  assert.match(service('taiga-back'), /entrypoint: \["bash", "-c", "set -euo pipefail ; python manage\.py migrate ; python manage\.py loaddata initial_project_templates ; exec gunicorn taiga\.wsgi:application --name taiga_api --bind 0\.0\.0\.0:8000 --workers 3 --worker-tmp-dir \/dev\/shm --log-level=info --access-logfile -"\]/, 'the image\'s start without its owner step');
+  assert.match(service('taiga-async'), /entrypoint: \["celery", "-A", "taiga\.celery", "worker", "-B", "--concurrency", "4", "-l", "INFO", "--schedule", "\/tmp\/taiga-celerybeat-schedule"\]/, 'the worker\'s too, its schedule in /tmp');
+  assert.doesNotMatch(COMPOSE, /gosu|chown|async_entrypoint/, 'nothing that only root may do');
+  assert.match(service('taiga-async'), /takes a worker whose group has no name in the image[^]*\n    environment:\n      HOME: \/tmp\n      C_FORCE_ROOT: "true"\n/, 'the worker starts as the project\'s user, which Celery takes for root without a group name, and the compose file says why');
+  assert.match(service('taiga-gateway'), /\n      - \$\{DDEV_APPROOT\}\/taiga\/files\/media:\/taiga\/media:ro\n/, 'the gateway reads the media from the project folder');
+  for (const v of ['static', 'async-rabbitmq', 'events-rabbitmq']) assert.ok(COMPOSE.includes(`name: ddev-\${DDEV_SITENAME}-taiga-${v}`), `the ${v} volume is named after the project`);
+  assert.doesNotMatch(COMPOSE, /taiga-media|\n\s+- media:|\n  media:\n/, 'no media volume');
   assert.match(service('taiga-gateway'), /HTTP_EXPOSE: "80:80"/);
   assert.match(COMPOSE, /HTTPS_EXPOSE=8457:80,8026:8025/, 'the web container moves, its mail catcher stays at :8026');
   assert.doesNotMatch(COMPOSE, /PASSWORD|SECRET_KEY=|TOKEN/, 'no secret in the compose file');
@@ -257,7 +268,7 @@ test('Taiga\'s reference setup on DDEV: every image pinned, the two changes from
   assert.match(env, /\( umask 077\n/, 'taiga/*env are their owner\'s only');
   const ddev = written('ddev', 'https://mysite.ddev.site');
   assert.deepStrictEqual(ddev.calls, [], 'DDEV: no call of the runtime layer');
-  assert.deepStrictEqual(ddev.files, ['.ddev/.env', '.ddev/config.taiga.yaml', '.ddev/docker-compose.taiga.yaml', 'taiga/env', 'taiga/events.env', 'taiga/front.env', 'taiga/gateway.conf', 'taiga/protected.env', 'taiga/rabbitmq.env', 'taiga/taiga-site.py'], 'DDEV: the files it had');
+  assert.deepStrictEqual(ddev.files, ['.ddev/.env', '.ddev/config.taiga.yaml', '.ddev/docker-compose.taiga.yaml', 'taiga/env', 'taiga/events.env', 'taiga/files/', 'taiga/front.env', 'taiga/gateway.conf', 'taiga/protected.env', 'taiga/rabbitmq.env', 'taiga/taiga-site.py', 'taiga/files/media/'], 'DDEV: the files it had, and the media\'s folder, made before the services start');
   for (const line of ['POSTGRES_HOST=db', 'TAIGA_SITES_SCHEME=https', 'TAIGA_SITES_DOMAIN=mysite.ddev.site', 'EMAIL_HOST=web', 'EMAIL_PORT=1025', 'ENABLE_TELEMETRY=False', 'PUBLIC_REGISTER_ENABLED=False']) {
     assert.ok(values(ddev.read('taiga/env')).includes(line), line);
   }
@@ -265,7 +276,12 @@ test('Taiga\'s reference setup on DDEV: every image pinned, the two changes from
   assert.doesNotMatch(ddev.read('taiga/env'), /COOKIE_SECURE/, 'DDEV: https, Taiga\'s own cookie settings');
   assert.doesNotMatch(ddev.read('taiga/rabbitmq.env'), /RABBITMQ_NODENAME/, 'DDEV: each RabbitMQ\'s host name is its own, as before');
   for (const f of ['taiga/env', 'taiga/rabbitmq.env', 'taiga/front.env', 'taiga/events.env', 'taiga/protected.env']) assert.strictEqual(ddev.mode(f), 0o600, `${f} is its owner's only`);
-  assert.match(read('README.md'), /\*\*Two changes from the reference setup\*\*/, 'the README says both');
+  const readme = read('README.md');
+  assert.match(readme, /\*\*Four changes from the reference setup\*\*/, 'the README says the four');
+  const upgrade = readme.slice(readme.indexOf('### Upgrading a DDEV site from 1.0.0'), readme.indexOf('### The default accounts'));
+  const steps = ['mkdir -p taiga/files/media', 'docker cp ddev-mysite-taiga-back:/taiga-back/media/. taiga/files/media/', 'cp ~/workspace/core/scripts/plugins/taiga/docker-compose.taiga.yaml .ddev/', 'ddev restart', 'docker volume rm ddev-mysite-taiga-media'];
+  for (let i = 1; i < steps.length; i++) assert.ok(upgrade.indexOf(steps[i - 1]) >= 0 && upgrade.indexOf(steps[i - 1]) < upgrade.indexOf(steps[i]), `the upgrade of a 1.0.0 DDEV site, in order: ${steps[i]}`);
+  assert.match(readme, /in the project's `taiga\/files\/media` on\n  every runtime, which the row's Backup holds/, 'the Backup holds the media on every runtime');
 });
 
 test('on Docker Compose, Podman and Kubernetes: Taiga\'s back-end image as the web container\'s, its other services under DDEV\'s names', () => {

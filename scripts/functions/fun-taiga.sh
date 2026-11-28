@@ -193,6 +193,9 @@ DOCKEREOF
 
   cp "${from}/taiga-gateway.conf" "${project_path}/${TAIGA_FILES}/gateway.conf" || return 1 ;
   cp "${from}/docker-compose.taiga.yaml" "${project_path}/.ddev/docker-compose.taiga.yaml" || return 1 ;
+  # Taiga's media in the project folder, made by the project's user before the services start (a folder Docker made for
+  # the mount would be root's).
+  mkdir -p "${project_path}/${TAIGA_FILES}/files/media" || return 1 ;
   printf '%s\n' "TAIGA_BACK_IMAGE=${TAIGA_BACK_IMAGE}" "TAIGA_FRONT_IMAGE=${TAIGA_FRONT_IMAGE}" "TAIGA_EVENTS_IMAGE=${TAIGA_EVENTS_IMAGE}" \
     "TAIGA_PROTECTED_IMAGE=${TAIGA_PROTECTED_IMAGE}" "TAIGA_RABBITMQ_IMAGE=${TAIGA_RABBITMQ_IMAGE}" "TAIGA_GATEWAY_IMAGE=${TAIGA_GATEWAY_IMAGE}" \
     > "${project_path}/.ddev/.env" || return 1 ;

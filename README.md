@@ -59,10 +59,11 @@ A project of the same name is deleted first, with its database and its volumes. 
 ([taigaio/taiga-docker](https://github.com/taigaio/taiga-docker)) beside a generic project's web container, at
 `https://mysite.ddev.site`: its back end, the back end's Celery worker (async), its front end, its events (the live
 board), its protected media, the nginx gateway in front of them (its routes, `taiga/gateway.conf`, are the reference's,
-written anew), and the two RabbitMQ, one for the worker and one for the events. Taiga's static files, its media and the
-two RabbitMQ keep their data in volumes named after the project (`ddev-mysite-taiga-static`, `-taiga-media`,
-`-taiga-async-rabbitmq`, `-taiga-events-rabbitmq`), which go with it. The project's web container keeps the mail
-catcher, at `https://mysite.ddev.site:8026`, where the site's mail goes.
+written anew), and the two RabbitMQ, one for the worker and one for the events. Taiga's static files and the two
+RabbitMQ keep their data in volumes named after the project (`ddev-mysite-taiga-static`, `-taiga-async-rabbitmq`,
+`-taiga-events-rabbitmq`), which go with it; its media (attachments, photos, exports) are in the project folder,
+`taiga/files/media`. The project's web container keeps the mail catcher, at `https://mysite.ddev.site:8026`, where the
+site's mail goes.
 
 Before Taiga's installer, on every runtime, the builder waits for up to three minutes until both RabbitMQ take
 connections as Taiga's back end makes them: the installer sends to them, and a broker that is still starting, or
@@ -89,7 +90,7 @@ the major version Taiga's reference pins; the back end and the worker reach it a
 (`PUBLIC_REGISTER_ENABLED=False` in the back end, `false` in the front end): the sign-in page offers no sign-up, and an
 administrator makes the accounts.
 
-**Two changes from the reference setup**, each said in the compose file:
+**Four changes from the reference setup**, each said in the compose file:
 
 - **The events come back on their own** (`restart: on-failure` on `taiga-events`). taiga-events 6.10.0 exits on an
   unhandled rejection ("Channel ended, no reply will be forthcoming") when a page closes its websocket right after
@@ -98,6 +99,13 @@ administrator makes the accounts.
 - **The Celery worker starts after the back end** (`taiga-async` depends on `taiga-back`). Both mount the same new
   static volume, which Docker fills from the image when a container is made with it, and two made at once can fail
   ("mkdir …/_data/img: file exists"). The reference makes the two at once.
+- **The back end and its worker run as the project's user** (`user: "${DDEV_UID}:${DDEV_GID}"`), so what they write is
+  the project's own. Their images' own starts first make `/taiga-back` the taiga user's, which only root may: the back
+  end starts as the reference's does without that step (the migrations, the project templates, then the API), and the
+  worker keeps its schedule in `/tmp`. Celery takes a worker whose group has no name in the image for root and will not
+  start it with Taiga's pickled messages: `C_FORCE_ROOT` lets it start, as the project's user, not root.
+- **Taiga's media are in the project folder** (`taiga/files/media`, mounted where the reference mounts a media volume):
+  the row's Backup holds them, and removing the project removes them.
 
 **How the accounts are made.** The builder's script (`taiga/taiga-site.py` of the project) runs with Taiga's own code
 in its back end's container, through `python manage.py shell`. With `--install` the workspace account becomes the
@@ -164,9 +172,28 @@ it back itself, as for any project on PostgreSQL:
   itself (webship/workspace#968). On an older core, stop Taiga's back end and its worker before an Import on DDEV, and
   start them again after: `docker stop ddev-<name>-taiga-async ddev-<name>-taiga-back`, then
   `docker start ddev-<name>-taiga-back ddev-<name>-taiga-async`.
-- **What Taiga keeps beside its database** (attachments, photos, exports): on DDEV in the project's media volume, which
-  the backup does not hold; on the other runtimes in the project's `taiga/files/media`, which the project's archive
-  holds.
+- **What Taiga keeps beside its database** (attachments, photos, exports): in the project's `taiga/files/media` on
+  every runtime, which the row's Backup holds. A DDEV site built with the plugin's 1.0.0 keeps them in a volume of its
+  own until it is upgraded: see [Upgrading a DDEV site from 1.0.0](#upgrading-a-ddev-site-from-100).
+
+### Upgrading a DDEV site from 1.0.0
+
+A site built on DDEV with the plugin's 1.0.0 keeps its media in a volume of its own (`ddev-mysite-taiga-media`), which
+the row's Backup does not hold, and runs its back end and worker as Taiga's own user. A site built again with this
+release has them in the project folder. To keep a site as it is, once the plugin is updated, move them there, from the
+site's folder:
+
+```bash
+cd ~/workspace/dev/mysite          # the site's folder (dev, test, sandboxes or demos)
+mkdir -p taiga/files/media
+docker cp ddev-mysite-taiga-back:/taiga-back/media/. taiga/files/media/
+cp ~/workspace/core/scripts/plugins/taiga/docker-compose.taiga.yaml .ddev/
+ddev restart
+docker volume rm ddev-mysite-taiga-media
+```
+
+Taiga then reads and writes its media in `taiga/files/media`, as the project's user, and the row's Backup holds them.
+The last line removes the old volume, which nothing mounts any more (removing the project would leave it).
 
 ### The default accounts
 
