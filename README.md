@@ -154,11 +154,11 @@ it back itself, as for any project on PostgreSQL:
 - **The row's Import** on Docker Compose, Podman and Kubernetes puts the dump into a database of its own and swaps it
   in, which a Taiga that is connected to its database does not stop.
 - **On DDEV**, DDEV's own import drops the database first, which PostgreSQL refuses while Taiga's back end or its Celery
-  worker are connected, as they can be once the site has been used. The Workspace's core closes the database to new
-  connections and ends its sessions first (webship/workspace#968). Until the Workspace's core 1.0.47, stop Taiga's back
-  end and its worker before an Import on DDEV, and start them again after:
-  `docker stop ddev-<name>-taiga-async ddev-<name>-taiga-back`, then `docker start ddev-<name>-taiga-back
-  ddev-<name>-taiga-async`.
+  worker are connected, as they can be once the site has been used. The Workspace's core 1.0.47 and later close the
+  database to new connections and end its sessions first, so the Import goes through and Taiga connects again by
+  itself (webship/workspace#968). On an older core, stop Taiga's back end and its worker before an Import on DDEV, and
+  start them again after: `docker stop ddev-<name>-taiga-async ddev-<name>-taiga-back`, then
+  `docker start ddev-<name>-taiga-back ddev-<name>-taiga-async`.
 - **What Taiga keeps beside its database** (attachments, photos, exports): on DDEV in the project's media volume, which
   the backup does not hold; on the other runtimes in the project's `taiga/files/media`, which the project's archive
   holds.

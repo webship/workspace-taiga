@@ -408,7 +408,8 @@ test('Taiga\'s database in the core\'s backups and restores: the core\'s own, no
   const readme = read('README.md');
   assert.match(readme, /^### Backups\n/m);
   assert.match(readme, /webship\/workspace#968/, 'the README names the core\'s fix of DDEV\'s import');
-  assert.match(readme, /Until the Workspace's core 1\.0\.47, stop Taiga's back/, 'and what to do before it');
+  assert.match(readme, /The Workspace's core 1\.0\.47 and later close the\n  database to new connections/, 'the core that does it');
+  assert.match(readme, /On an older core, stop Taiga's back end and its worker before an Import on DDEV/, 'and what to do on an older one');
 });
 
 test('the functions carry the names the core\'s tools look for; --connect keeps the token off screens and command lines', () => {
