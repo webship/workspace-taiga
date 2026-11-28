@@ -34,9 +34,10 @@ bash core/scripts/plugins.sh --configure taiga
 
 - A sites folder: one of the `dev`, `test`, `sandboxes` or `demos` plugins. The commands are placed there.
 - The AI folders `ai-agents`, `ai-skills`, `ai-commands` and `ai-prompts`, where its AI items land.
-- A container runtime: DDEV (the default), Docker Compose, Podman or Kubernetes. On Docker Compose and Podman the
-  Workspace's core must start a project's own services again when they stop on their own (webship/workspace#959, core
-  1.0.45): the builder says so on an older core, and changes nothing. Lando and Docksal are not proven for Taiga yet.
+- A container runtime: DDEV (the default), Docker Compose, Podman or Kubernetes. Off DDEV the Workspace's core must
+  give a project's own service an open-files limit (`rt_service --nofile`, webship/workspace#982, core 1.0.51), and so
+  start a project's own services again when they stop on their own too (webship/workspace#959, core 1.0.45): the
+  builder says so on an older core, and changes nothing. Lando and Docksal are not proven for Taiga yet.
 - A download of about 1.3 GB for Taiga's images the first time, and memory: the builder asks for 2 GB free before it
   starts (`free -m`).
 
@@ -146,9 +147,12 @@ The layout differs from DDEV's in one place, the back end:
   (`taiga-protected`), and the two RabbitMQ (`taiga-events-rabbitmq`, `taiga-async-rabbitmq`), each with its data in a
   volume of the project's own and a node name (`rabbit@localhost`) that stays when its container gets another host
   name. None of them needs the database or another service to start.
-- **The two RabbitMQ start with an open-files limit of 65536.** Erlang sizes its tables to that limit, and a
-  Kubernetes node gives its pods the kernel's highest: with it one RabbitMQ took 1.6 GB on kind and was killed for
-  memory, where with Docker's own limit it takes about 120 MB.
+- **The two RabbitMQ start with an open-files limit of 65536,** the core's `rt_service --nofile 65536`
+  (webship/workspace#982, core 1.0.51): `ulimits` on Docker Compose, and on Kubernetes and Podman a start that lowers
+  the limit and then runs the image's own. Erlang sizes its tables to that limit, and a Kubernetes node gives its pods
+  the kernel's highest: with it one RabbitMQ took 1.6 GB on kind and was killed for memory, where with 65536 it takes
+  about 120 to 200 MB. A site built with the plugin's 1.0.1 keeps the start it was written with, which lowers the
+  limit too, until it is built again.
 - **The events come back on their own** there too: Docker Compose and Podman start a project's own service again when
   it stops on its own (`restart: on-failure`, webship/workspace#959, core 1.0.45), and Kubernetes does by itself. The
   builder asks for that core on Docker Compose and Podman.

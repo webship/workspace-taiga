@@ -211,6 +211,7 @@ test('the runtimes: DDEV, Docker Compose, Podman and Kubernetes; another is refu
   const guard = build.indexOf('case "${runtime}" in');
   const services = build.indexOf('! declare -f rt_service > /dev/null');
   const restart = build.indexOf('! declare -f rt_service_restart > /dev/null');
+  const nofile = build.indexOf("! declare -f rt_service | grep -q -- '--nofile)'");
   assert.ok(guard > 0 && guard < build.indexOf('drop_database') && guard < build.indexOf('ddev config'), 'the runtime is asked first');
   assert.match(build, /case "\$\{runtime\}" in\n\s+ddev\|docker\|podman\|kubernetes\) ;;/, 'the four runtimes the plugin was proven on');
   assert.ok(build.includes('Taiga builds on DDEV, Docker Compose, Podman and Kubernetes for now (--runtime ddev, docker, podman or kubernetes), not on ${runtime}: that runtime is not proven for it yet. Nothing was changed.'));
@@ -218,6 +219,11 @@ test('the runtimes: DDEV, Docker Compose, Podman and Kubernetes; another is refu
   assert.ok(restart > services && restart < build.indexOf('drop_database'), 'and so is one whose services do not come back, before anything is removed');
   assert.match(build, /if \{ \[ "\$\{runtime\}" = 'docker' \] \|\| \[ "\$\{runtime\}" = 'podman' \] ; \} && ! declare -f rt_service_restart > \/dev\/null ; then/, 'on Docker Compose and Podman only: Kubernetes starts a service again by itself');
   assert.ok(build.includes('(rt_service_restart, webship/workspace#959, core 1.0.45)'), 'the builder names the core it needs');
+  // Off DDEV, a core whose rt_service takes --nofile (webship/workspace#982), asked before anything is removed.
+  assert.ok(nofile > services && nofile < build.indexOf('drop_database'), 'a core without the open-files limit is told so before anything is removed');
+  assert.match(build, /if \[ "\$\{runtime\}" != 'ddev' \] && ! declare -f rt_service \| grep -q -- '--nofile\)' ; then\n\s+echo "--runtime \$\{runtime\} needs a Webship Workspace that gives a project's own service an open-files limit \(rt_service --nofile, webship\/workspace#982, core 1\.0\.51\)/);
+  assert.doesNotMatch(FUN, /TAIGA_RABBITMQ_COMMAND|ulimit -n/, 'no start of the plugin\'s own around RabbitMQ\'s');
+  assert.match(FUN, /^readonly TAIGA_RABBITMQ_NOFILE=65536;$/m);
   assert.ok(build.indexOf('taiga_free_memory') < build.indexOf('drop_database'), 'the free memory is asked before anything is removed');
   assert.match(FUN, /^readonly TAIGA_MEMORY_MB=2048;$/m);
   assert.match(FUN, /^readonly TAIGA_DATABASE='postgres:12';$/m, 'PostgreSQL 12, the major version Taiga\'s reference pins');
@@ -302,8 +308,9 @@ test('on Docker Compose, Podman and Kubernetes: Taiga\'s back-end image as the w
       'rt_service taiga-front docker.io/taigaio/taiga-front:6.10.3 --port 80 --env-file taiga/front.env',
       'rt_service taiga-events docker.io/taigaio/taiga-events:6.10.0 --port 8888 --env-file taiga/events.env',
       'rt_service taiga-protected docker.io/taigaio/taiga-protected:6.10.1 --port 8003 --env-file taiga/protected.env',
-      "rt_service taiga-events-rabbitmq docker.io/library/rabbitmq:3.8.34-management-alpine --port 5672 --env-file taiga/rabbitmq.env --volume /var/lib/rabbitmq --command sh -c 'ulimit -n 65536 2> /dev/null ; exec docker-entrypoint.sh rabbitmq-server'",
-      "rt_service taiga-async-rabbitmq docker.io/library/rabbitmq:3.8.34-management-alpine --port 5672 --env-file taiga/rabbitmq.env --volume /var/lib/rabbitmq --command sh -c 'ulimit -n 65536 2> /dev/null ; exec docker-entrypoint.sh rabbitmq-server'",
+      // The core's open-files limit (webship/workspace#982), not a start of the plugin's own around the image's.
+      'rt_service taiga-events-rabbitmq docker.io/library/rabbitmq:3.8.34-management-alpine --port 5672 --env-file taiga/rabbitmq.env --volume /var/lib/rabbitmq --nofile 65536',
+      'rt_service taiga-async-rabbitmq docker.io/library/rabbitmq:3.8.34-management-alpine --port 5672 --env-file taiga/rabbitmq.env --volume /var/lib/rabbitmq --nofile 65536',
       'rt_serve 8080 [bash taiga/taiga-serve.sh]',
     ], runtime);
     // The web image: the stack's start, not the image's own (which runs Taiga as its taiga user), nginx, and the media
