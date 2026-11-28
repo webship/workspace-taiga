@@ -302,8 +302,8 @@ test('on Docker Compose, Podman and Kubernetes: Taiga\'s back-end image as the w
       'rt_service taiga-front docker.io/taigaio/taiga-front:6.10.3 --port 80 --env-file taiga/front.env',
       'rt_service taiga-events docker.io/taigaio/taiga-events:6.10.0 --port 8888 --env-file taiga/events.env',
       'rt_service taiga-protected docker.io/taigaio/taiga-protected:6.10.1 --port 8003 --env-file taiga/protected.env',
-      'rt_service taiga-events-rabbitmq docker.io/library/rabbitmq:3.8.34-management-alpine --port 5672 --env-file taiga/rabbitmq.env --volume /var/lib/rabbitmq',
-      'rt_service taiga-async-rabbitmq docker.io/library/rabbitmq:3.8.34-management-alpine --port 5672 --env-file taiga/rabbitmq.env --volume /var/lib/rabbitmq',
+      "rt_service taiga-events-rabbitmq docker.io/library/rabbitmq:3.8.34-management-alpine --port 5672 --env-file taiga/rabbitmq.env --volume /var/lib/rabbitmq --command sh -c 'ulimit -n 65536 2> /dev/null ; exec docker-entrypoint.sh rabbitmq-server'",
+      "rt_service taiga-async-rabbitmq docker.io/library/rabbitmq:3.8.34-management-alpine --port 5672 --env-file taiga/rabbitmq.env --volume /var/lib/rabbitmq --command sh -c 'ulimit -n 65536 2> /dev/null ; exec docker-entrypoint.sh rabbitmq-server'",
       'rt_serve 8080 [bash taiga/taiga-serve.sh]',
     ], runtime);
     // The web image: the stack's start, not the image's own (which runs Taiga as its taiga user), nginx, and the media

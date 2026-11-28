@@ -146,6 +146,9 @@ The layout differs from DDEV's in one place, the back end:
   (`taiga-protected`), and the two RabbitMQ (`taiga-events-rabbitmq`, `taiga-async-rabbitmq`), each with its data in a
   volume of the project's own and a node name (`rabbit@localhost`) that stays when its container gets another host
   name. None of them needs the database or another service to start.
+- **The two RabbitMQ start with an open-files limit of 65536.** Erlang sizes its tables to that limit, and a
+  Kubernetes node gives its pods the kernel's highest: with it one RabbitMQ took 1.6 GB on kind and was killed for
+  memory, where with Docker's own limit it takes about 120 MB.
 - **The events come back on their own** there too: Docker Compose and Podman start a project's own service again when
   it stops on its own (`restart: on-failure`, webship/workspace#959, core 1.0.45), and Kubernetes does by itself. The
   builder asks for that core on Docker Compose and Podman.

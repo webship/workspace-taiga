@@ -43,6 +43,10 @@ readonly TAIGA_EVENTS_IMAGE='docker.io/taigaio/taiga-events:6.10.0';
 readonly TAIGA_PROTECTED_IMAGE='docker.io/taigaio/taiga-protected:6.10.1';
 readonly TAIGA_RABBITMQ_IMAGE='docker.io/library/rabbitmq:3.8.34-management-alpine';
 readonly TAIGA_GATEWAY_IMAGE='docker.io/library/nginx:1.19.10-alpine';
+# RabbitMQ's start off DDEV, with an open-files limit of 65536: Erlang sizes its tables to that limit, and a
+# Kubernetes node (kind's containerd) gives a pod the kernel's highest, 1073741816, with which one RabbitMQ took
+# 1.6 GB and was killed for memory. With Docker's 1024, or 1048576, it takes about 120 MB.
+readonly TAIGA_RABBITMQ_COMMAND="sh -c 'ulimit -n 65536 2> /dev/null ; exec docker-entrypoint.sh rabbitmq-server'";
 # The release the builder runs, as Taiga's back end names it.
 readonly TAIGA_RELEASE='6.10.2';
 
@@ -186,7 +190,9 @@ DOCKEREOF
       && rt_service taiga-events "${TAIGA_EVENTS_IMAGE}" --port 8888 --env-file "${TAIGA_FILES}/events.env" \
       && rt_service taiga-protected "${TAIGA_PROTECTED_IMAGE}" --port 8003 --env-file "${TAIGA_FILES}/protected.env" \
       && rt_service taiga-events-rabbitmq "${TAIGA_RABBITMQ_IMAGE}" --port 5672 --env-file "${TAIGA_FILES}/rabbitmq.env" --volume /var/lib/rabbitmq \
+        --command "${TAIGA_RABBITMQ_COMMAND}" \
       && rt_service taiga-async-rabbitmq "${TAIGA_RABBITMQ_IMAGE}" --port 5672 --env-file "${TAIGA_FILES}/rabbitmq.env" --volume /var/lib/rabbitmq \
+        --command "${TAIGA_RABBITMQ_COMMAND}" \
       && rt_serve "${TAIGA_SERVE_PORT}" "bash ${TAIGA_FILES}/taiga-serve.sh" ) || return 1 ;
     return 0 ;
   fi
