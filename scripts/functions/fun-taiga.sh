@@ -43,10 +43,10 @@ readonly TAIGA_EVENTS_IMAGE='docker.io/taigaio/taiga-events:6.10.0';
 readonly TAIGA_PROTECTED_IMAGE='docker.io/taigaio/taiga-protected:6.10.1';
 readonly TAIGA_RABBITMQ_IMAGE='docker.io/library/rabbitmq:3.8.34-management-alpine';
 readonly TAIGA_GATEWAY_IMAGE='docker.io/library/nginx:1.19.10-alpine';
-# RabbitMQ's start off DDEV, with an open-files limit of 65536: Erlang sizes its tables to that limit, and a
-# Kubernetes node (kind's containerd) gives a pod the kernel's highest, 1073741816, with which one RabbitMQ took
-# 1.6 GB and was killed for memory. With Docker's 1024, or 1048576, it takes about 120 MB.
-readonly TAIGA_RABBITMQ_COMMAND="sh -c 'ulimit -n 65536 2> /dev/null ; exec docker-entrypoint.sh rabbitmq-server'";
+# RabbitMQ's open-files limit off DDEV (rt_service --nofile, webship/workspace#982, core 1.0.51): Erlang sizes its
+# tables to that limit, and a Kubernetes node (kind's containerd) gives a pod the kernel's highest, 1073741816, with
+# which one RabbitMQ took 1.6 GB and was killed for memory. With 65536 it takes about 120 to 200 MB.
+readonly TAIGA_RABBITMQ_NOFILE=65536;
 # The release the builder runs, as Taiga's back end names it.
 readonly TAIGA_RELEASE='6.10.2';
 
@@ -190,9 +190,9 @@ DOCKEREOF
       && rt_service taiga-events "${TAIGA_EVENTS_IMAGE}" --port 8888 --env-file "${TAIGA_FILES}/events.env" \
       && rt_service taiga-protected "${TAIGA_PROTECTED_IMAGE}" --port 8003 --env-file "${TAIGA_FILES}/protected.env" \
       && rt_service taiga-events-rabbitmq "${TAIGA_RABBITMQ_IMAGE}" --port 5672 --env-file "${TAIGA_FILES}/rabbitmq.env" --volume /var/lib/rabbitmq \
-        --command "${TAIGA_RABBITMQ_COMMAND}" \
+        --nofile "${TAIGA_RABBITMQ_NOFILE}" \
       && rt_service taiga-async-rabbitmq "${TAIGA_RABBITMQ_IMAGE}" --port 5672 --env-file "${TAIGA_FILES}/rabbitmq.env" --volume /var/lib/rabbitmq \
-        --command "${TAIGA_RABBITMQ_COMMAND}" \
+        --nofile "${TAIGA_RABBITMQ_NOFILE}" \
       && rt_serve "${TAIGA_SERVE_PORT}" "bash ${TAIGA_FILES}/taiga-serve.sh" ) || return 1 ;
     return 0 ;
   fi
@@ -425,6 +425,12 @@ function taiga_build() {
   # Taiga's events service stops on its own in normal use (a page that closes its websocket right after subscribing), and
   # comes back only where the runtime starts it again: on Docker Compose and Podman that is the core's restart policy of
   # a project's own services (webship/workspace#959); Kubernetes starts it again by itself.
+  # Taiga's two RabbitMQ size Erlang's tables to their open-files limit: off DDEV the core's rt_service gives them
+  # 65536 (--nofile, webship/workspace#982). Its rt_service is asked whether it takes the option.
+  if [ "${runtime}" != 'ddev' ] && ! declare -f rt_service | grep -q -- '--nofile)' ; then
+    echo "--runtime ${runtime} needs a Webship Workspace that gives a project's own service an open-files limit (rt_service --nofile, webship/workspace#982, core 1.0.51): Taiga's RabbitMQ sizes itself to that limit, and took 1.6 GB on Kubernetes without it. Update the workspace, or build on DDEV. Nothing was changed." ;
+    exit 1 ;
+  fi
   if { [ "${runtime}" = 'docker' ] || [ "${runtime}" = 'podman' ] ; } && ! declare -f rt_service_restart > /dev/null ; then
     echo "--runtime ${runtime} needs a Webship Workspace that starts a project's own services again when they stop on their own (rt_service_restart, webship/workspace#959, core 1.0.45): Taiga's events service stops on its own when a page closes its websocket early. Update the workspace, or build on DDEV or Kubernetes. Nothing was changed." ;
     exit 1 ;
