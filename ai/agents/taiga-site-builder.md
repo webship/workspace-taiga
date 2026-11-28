@@ -37,8 +37,10 @@ them (`nginx:1.19.10-alpine`) and the two RabbitMQ (`rabbitmq:3.8.34-management-
 `latest`. The database is the project's own db service on PostgreSQL 12, the major version Taiga's reference pins:
 Taiga needs PostgreSQL. On DDEV the gateway takes the project's address, `https://mysite.ddev.site`; the project's web
 container keeps the mail catcher at `https://mysite.ddev.site:8026`, where the site's mail goes. Taiga's telemetry is
-off, and so is its public sign-up. Docker Compose, Podman and Kubernetes are not proven for Taiga yet: the builder says
-so and stops before it changes anything.
+off, and so is its public sign-up. With `--runtime docker`, `podman` or `kubernetes` Taiga's back-end image is the web
+container's, which runs its API, its Celery worker and the gateway as your user, and its other services are the
+project's own, at the address the runtime gives it (the build says it). Lando and Docksal are not proven for Taiga yet:
+the builder says so and stops before it changes anything.
 
 Two changes from the reference setup, each said in the compose file: the events service comes back on its own
 (`restart: on-failure`), because taiga-events 6.10.0 exits when a page closes its websocket right after subscribing;
@@ -53,7 +55,7 @@ images. Build one site at a time, and stop a site you are not using.
 | `--install` | The workspace account as the site's administrator (its Django admin at `/admin/` too); the public sign-up stays off |
 | `--add-users` | With `--install`: the default accounts, in their roles of the Scrum project Webship site |
 | `--sample-content` | With `--install --add-users`: Sprint 1, three user stories of Webship site (two in the sprint, one in the backlog), an assignee, a tag, a comment and a task |
-| `--runtime ddev` | The container runtime: DDEV, the one proven for Taiga so far |
+| `--runtime <runtime>` | The container runtime: `ddev` (the default), `docker` (Docker Compose), `podman` or `kubernetes` |
 | `--launch` | Open the site when it is ready |
 
 A project of the same name is deleted first, with its database and Taiga's volumes (static files, media, the two

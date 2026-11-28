@@ -490,6 +490,8 @@ test('the assistant is told how to build, test and connect a site, and what Taig
   assert.match(told, /2 GB of free memory/);
   assert.match(told, /--connect <login>/);
   assert.match(told, /PostgreSQL 12 \(Taiga needs PostgreSQL\)/);
+  assert.match(told, /with `--runtime docker`, `podman` or `kubernetes` at the address the runtime gives it/, 'the runtimes it builds on');
+  for (const f of ['ai/agents/taiga-site-builder.md', 'src/index.ts']) assert.doesNotMatch(read(f), /Podman and Kubernetes are not proven|other runtimes are not proven/, `${f}: no runtime said unproven that is proven`);
   assert.match(told, /the current sprint is its iteration view, and there is no worklog/);
 });
 
